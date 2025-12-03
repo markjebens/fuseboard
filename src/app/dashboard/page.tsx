@@ -4,7 +4,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
-import { Layers, LogOut, User } from "lucide-react";
+import { Layers, LogOut, User, Loader2 } from "lucide-react";
 import { ProjectTabs } from "@/components/project-tabs";
 import { AssetsPanel } from "@/components/assets-panel";
 import { Graph } from "@/components/graph";
@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function Dashboard() {
-  const { active, init } = useProjects(); // ✅ Added init
+  const { active, init, isLoading } = useProjects();
   const p = active();
   const [showGen, setShowGen] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
@@ -27,7 +27,7 @@ export default function Dashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
       if (user) {
-        init(); // ✅ Fetch projects for this user
+        init();
       }
     };
     getUser();
@@ -37,6 +37,14 @@ export default function Dashboard() {
     await supabase.auth.signOut();
     window.location.href = "/login";
   };
+
+  if (isLoading && !user) {
+     return (
+       <div className="h-screen w-screen flex items-center justify-center bg-background">
+         <Loader2 className="w-8 h-8 animate-spin text-primary" />
+       </div>
+     );
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background text-foreground transition-colors duration-300">
@@ -87,6 +95,15 @@ export default function Dashboard() {
 
         {/* Canvas */}
         <section className="flex-1 min-w-0 bg-card rounded-2xl border border-border shadow-sm overflow-hidden relative">
+          {isLoading ? (
+             <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm z-10">
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">Loading project...</p>
+                </div>
+             </div>
+          ) : null}
+          
           <Graph
             projectId={p?.id || "default"}
             onRequestGenerate={(prompt: string, images?: { id: string; alt: string; src: string }[]) => {
