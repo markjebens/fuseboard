@@ -1,5 +1,8 @@
 "use client";
 
+// Prevent static prerendering - this page requires authentication
+export const dynamic = "force-dynamic";
+
 import { useState, useEffect } from "react";
 import { Layers, LogOut, User } from "lucide-react";
 import { ProjectTabs } from "@/components/project-tabs";
