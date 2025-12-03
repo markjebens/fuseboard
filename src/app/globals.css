@@ -1,0 +1,177 @@
+@import "tailwindcss";
+
+@theme {
+  /* Zinc-based professional palette */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-full: 9999px;
+  
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-slide-in: slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Root Variables - Zinc Theme */
+@layer base {
+  :root {
+    /* Light Mode - Clean White/Grey */
+    --background: oklch(0.98 0 0);
+    --foreground: oklch(0.13 0.02 260);
+    
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.13 0.02 260);
+    
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.13 0.02 260);
+    
+    --primary: oklch(0.13 0.02 260); /* Almost Black */
+    --primary-foreground: oklch(0.98 0 0);
+    
+    --secondary: oklch(0.94 0.01 260); /* Light Grey */
+    --secondary-foreground: oklch(0.13 0.02 260);
+    
+    --muted: oklch(0.94 0.01 260);
+    --muted-foreground: oklch(0.45 0.02 260);
+    
+    --accent: oklch(0.94 0.01 260);
+    --accent-foreground: oklch(0.13 0.02 260);
+    
+    --destructive: oklch(0.57 0.19 27);
+    --destructive-foreground: oklch(0.98 0 0);
+    
+    --border: oklch(0.89 0.01 260);
+    --input: oklch(0.89 0.01 260);
+    --ring: oklch(0.13 0.02 260);
+    
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Dark Mode - Deep Grey/Zinc (No Blue) */
+    --background: oklch(0.1 0.01 260);
+    --foreground: oklch(0.98 0 0);
+    
+    --card: oklch(0.13 0.01 260);
+    --card-foreground: oklch(0.98 0 0);
+    
+    --popover: oklch(0.13 0.01 260);
+    --popover-foreground: oklch(0.98 0 0);
+    
+    --primary: oklch(0.98 0 0); /* White */
+    --primary-foreground: oklch(0.1 0.01 260);
+    
+    --secondary: oklch(0.18 0.01 260);
+    --secondary-foreground: oklch(0.98 0 0);
+    
+    --muted: oklch(0.18 0.01 260);
+    --muted-foreground: oklch(0.65 0.01 260);
+    
+    --accent: oklch(0.18 0.01 260);
+    --accent-foreground: oklch(0.98 0 0);
+    
+    --destructive: oklch(0.39 0.14 27);
+    --destructive-foreground: oklch(0.98 0 0);
+    
+    --border: oklch(0.18 0.01 260);
+    --input: oklch(0.18 0.01 260);
+    --ring: oklch(0.8 0 0);
+  }
+}
+
+/* Base styles */
+html {
+  font-family: var(--font-sans);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* React Flow Overrides to match Zinc theme */
+.react-flow__background {
+  background: var(--color-background) !important;
+  opacity: 0.5;
+}
+
+.react-flow__controls {
+  background: var(--color-card) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
+}
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border-bottom: 1px solid var(--color-border) !important;
+  color: var(--color-foreground) !important;
+}
+
+.react-flow__minimap {
+  background: var(--color-card) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-lg) !important;
+}
+
+.react-flow__edge-path {
+  stroke: var(--color-muted-foreground) !important;
+  stroke-width: 1.5px !important;
+}
+
+.react-flow__handle {
+  background: var(--color-background) !important;
+  border: 2px solid var(--color-primary) !important;
+  width: 10px !important;
+  height: 10px !important;
+}
+
+/* Utility classes */
+@layer utilities {
+  .glass {
+    background: oklch(1 0 0 / 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--color-border);
+  }
+  .dark .glass {
+    background: oklch(0.13 0.01 260 / 0.8);
+  }
+}
