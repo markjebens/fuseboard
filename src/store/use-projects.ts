@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { nanoid } from "nanoid";
+import { v4 as uuidv4 } from "uuid"; // Use uuid instead of nanoid
 import type { Node, Edge } from "@xyflow/react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -68,7 +68,7 @@ interface ProjectsState {
   removeGenerated: (id: string) => Promise<void>;
 }
 
-const makeEmptyProject = (name = "Untitled", id = nanoid()): Project => ({
+const makeEmptyProject = (name = "Untitled", id = uuidv4()): Project => ({
   id,
   name,
   assets: [],
@@ -100,7 +100,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
 
       if (!dbProjects || dbProjects.length === 0) {
         // Create default project if none exist
-        const newId = nanoid();
+        const newId = uuidv4();
         await supabase.from("projects").insert({ id: newId, name: "My First Project", user_id: user.id });
         set({ projects: [makeEmptyProject("My First Project", newId)], activeId: newId, isLoading: false });
         return;
@@ -184,7 +184,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   },
 
   addProject: async (name) => {
-    const id = nanoid();
+    const id = uuidv4();
     const p = makeEmptyProject(name, id);
     
     // Optimistic update
@@ -220,7 +220,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
 
   addAssets: async (filesOrTexts) => {
     const p = get().active();
-    const toAdd = filesOrTexts.map((a) => ({ ...a, id: nanoid() }));
+    const toAdd = filesOrTexts.map((a) => ({ ...a, id: uuidv4() }));
     
     set((s) => ({
       projects: s.projects.map((pr) =>
@@ -305,7 +305,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     const p = get().active();
     const toAdd = items.map((it) => ({
       ...it,
-      id: nanoid(),
+      id: uuidv4(),
       createdAt: Date.now(),
     }));
     
@@ -333,7 +333,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
 
   savePreset: async (name, type, nodes, edges) => {
     const newPreset: Preset = {
-      id: nanoid(),
+      id: uuidv4(),
       name,
       type,
       nodes: JSON.parse(JSON.stringify(nodes)),
