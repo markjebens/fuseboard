@@ -34,7 +34,8 @@ import {
   Download,
   Sparkles,
   Palette,
-  User
+  User,
+  CheckCircle2
 } from "lucide-react";
 
 import { useProjects } from "@/store/use-projects";
@@ -108,7 +109,7 @@ function useDebounce(value: any, delay: number) {
 
 function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGenerate?: any }) {
   const { active, setGraph: setGraphStore, markGenerated: markGeneratedStore, addGenerated, savePreset, init } = useProjects();
-  const { setGenHint } = useUI();
+  const { setGenHint, setOpenGenerated } = useUI(); // Added setOpenGenerated
   const reactFlowInstance = useReactFlow();
 
   // Get the active project from store - this ensures we are always viewing the correct project data
@@ -138,6 +139,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   const [promptPreview, setPromptPreview] = useState("");
   const [isRefining, setIsRefining] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [lastStatus, setLastStatus] = useState<string | null>(null);
 
   // Initialize store on mount
   useEffect(() => {
@@ -176,11 +178,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   // Node helpers
   const addTextNode = useCallback(() => {
     const id = nanoid(8);
-    // Center of screen or fallback
     const pos = { x: 200, y: 200 }; 
-    // Try to get center if flow is ready
-    // const flowPos = reactFlowInstance.screenToFlowPosition({ x: window.innerWidth/2, y: window.innerHeight/2 });
-    
     setNodes((nds) => [
       ...nds,
       {
@@ -236,10 +234,8 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   const handleRefinePrompt = useCallback(async () => {
     setIsRefining(true);
     try {
-        // 1. Build a crude text representation of the graph
         const crudePrompt = buildSimplePrompt(nodes);
         
-        // 2. Call Refine API
         const res = await fetch('/api/refine', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -268,30 +264,36 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
       
       setIsGenerating(true);
       setGenHint(true);
+      setLastStatus(null);
 
       try {
-          // Call Generation API (defaults to Pollinations free)
+          console.log("Starting generation for prompt:", prompt);
           const res = await fetch('/api/generate', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({ 
                   prompt, 
                   provider: 'pollinations' 
-                  // We could pass images here if we upgrade the API to handle them
               })
           });
+          
           const data = await res.json();
+          console.log("Generation result:", data);
+
           if (data.images) {
-              // Wait for image to be "ready" or just push url
               await addGenerated(data.images.map((img: any) => ({
                   url: img.url,
                   prompt,
               })));
+              setLastStatus("Success! Check Library.");
+              // Ideally, open the library or show a preview
           } else {
               throw new Error(data.error || "No images returned");
           }
-      } catch (e) {
-          alert("Generation failed: " + e);
+      } catch (e: any) {
+          console.error("Generation failed:", e);
+          alert("Generation failed: " + (e.message || e));
+          setLastStatus("Failed");
       } finally {
           setIsGenerating(false);
       }
@@ -309,25 +311,21 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
       const bounds = evt.currentTarget.getBoundingClientRect();
       const pos = reactFlowInstance.screenToFlowPosition({ x: evt.clientX, y: evt.clientY });
 
-      // Handle Presets (Themes)
       const presetPayload = evt.dataTransfer.getData("application/x-preset");
       if (presetPayload) {
           try {
               const preset = JSON.parse(presetPayload);
-              // Import nodes/edges with offset
               const newNodes = preset.nodes.map((n: any) => ({
                   ...n,
                   id: nanoid(),
                   position: { x: n.position.x + pos.x, y: n.position.y + pos.y },
                   selected: true
               }));
-              // TODO: handle edges (needs ID mapping) - simple version just adds nodes
               setNodes((nds) => [...nds, ...newNodes]);
               return;
           } catch {}
       }
 
-      // Handle Assets
       const assetPayload = evt.dataTransfer.getData("application/x-asset");
       if (assetPayload) {
         try {
@@ -351,7 +349,6 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
         } catch {}
       }
       
-      // Handle Files
       if (evt.dataTransfer.files?.length) {
           createImageNodeFromFile(evt.dataTransfer.files[0], pos);
       }
@@ -359,11 +356,6 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
 
     const handleSavePreset = () => {
         if (!presetName) return;
-        // Save currently selected nodes or all nodes if none selected
-        const nodesToSave = selected ? [selected] : nodes; // In reality, multiselect is better
-        // For now, let's just save the whole graph as a "Theme" if nothing selected?
-        // Or better: Save the selection. React Flow supports multi-selection.
-        // We'll save ALL nodes for now as a "Scene Theme".
         savePreset(presetName, presetType, nodes, edges);
         setSaveDialogOpen(false);
         setPresetName("");
@@ -458,7 +450,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
                     <Button 
                         variant="default" 
                         size="sm" 
-                        className="text-xs h-8 bg-foreground text-background hover:bg-foreground/90"
+                        className="text-xs h-8 bg-foreground text-background hover:bg-foreground/90 relative overflow-hidden"
                         onClick={handleGenerate}
                         disabled={isGenerating}
                     >
@@ -466,6 +458,11 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
                         Generate
                     </Button>
                 </div>
+                {lastStatus && (
+                  <div className={cn("text-[10px] text-center font-medium animate-pulse", lastStatus.includes("Success") ? "text-green-500" : "text-red-500")}>
+                    {lastStatus}
+                  </div>
+                )}
             </div>
 
             {/* Node Editor */}
