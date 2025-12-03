@@ -59,6 +59,7 @@ interface ProjectsState {
   remove: (id: string) => Promise<void>;
   setActive: (id: string) => void;
   addAssets: (assets: Omit<Asset, "id">[]) => Promise<void>;
+  removeAsset: (id: string) => Promise<void>;
   setGraph: (graph: { nodes: Node[]; edges: Edge[] }) => Promise<void>;
   markGenerated: (payload: Project["lastGenerated"]) => void;
   addGenerated: (items: Omit<GeneratedItem, "id" | "createdAt">[]) => Promise<void>;
@@ -357,6 +358,37 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   deletePreset: async (id) => {
     set((s) => ({ presets: s.presets.filter((p) => p.id !== id) }));
     await supabase.from("presets").delete().eq("id", id);
+  },
+
+  removeAsset: async (id) => {
+    const p = get().active();
+    
+    // Find the asset to get its URL for storage deletion
+    const asset = p.assets.find(a => a.id === id);
+    
+    // Remove from local state
+    set((s) => ({
+      projects: s.projects.map((pr) =>
+        pr.id === p.id
+          ? { ...pr, assets: pr.assets.filter((a) => a.id !== id) }
+          : pr
+      ),
+    }));
+    
+    // Delete from database
+    await supabase.from("assets").delete().eq("id", id);
+    
+    // Delete from storage if it's a stored file (not a blob URL)
+    if (asset?.url && asset.url.includes('supabase.co')) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Extract path from URL
+        const urlParts = asset.url.split('/');
+        const filename = urlParts[urlParts.length - 1];
+        const path = `${user.id}/${filename}`;
+        await supabase.storage.from("assets").remove([path]);
+      }
+    }
   },
 
   removeGenerated: async (id) => {

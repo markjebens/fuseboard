@@ -28,7 +28,7 @@ interface AssetsPanelProps {
 }
 
 export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps) {
-  const { active, addAssets, presets, deletePreset } = useProjects();
+  const { active, addAssets, removeAsset, presets, deletePreset } = useProjects();
   const { genHint, openGenerated, clearGenHint } = useUI();
   const inputRef = useRef<HTMLInputElement>(null);
   const p = active();
@@ -58,6 +58,7 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
         throw uploadError;
       }
       const { data } = supabase.storage.from("assets").getPublicUrl(path);
+      console.log("Uploaded to storage:", path, "-> URL:", data.publicUrl);
       return data.publicUrl;
     },
     [supabase]
@@ -230,6 +231,18 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
                     {a.type}
                   </p>
                 </div>
+                
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeAsset(a.id);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
               </div>
             ))}
             {p.assets.length === 0 && (
