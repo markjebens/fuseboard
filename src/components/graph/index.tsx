@@ -194,13 +194,16 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   const createImageNodeFromFile = useCallback((file: File, pos?: { x: number; y: number }) => {
       const id = nanoid(8);
       const objectUrl = URL.createObjectURL(file);
+      // Clean filename: remove extension, replace delimiters with space
+      const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
+
       setNodes((nds) => [
         ...nds,
         {
           id,
           type: "imageNode",
           position: pos || { x: 100, y: 100 },
-          data: { src: objectUrl, srcKind: "objectURL", alt: file.name, note: "" },
+          data: { src: objectUrl, srcKind: "objectURL", alt: cleanName, note: "" },
         },
       ]);
     }, [setNodes]);
