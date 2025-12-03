@@ -45,7 +45,7 @@ export default function Home() {
         <section className="flex-1 min-w-0 bg-card rounded-2xl border border-border shadow-sm overflow-hidden relative">
           <Graph
             projectId={p?.id || "default"}
-            onRequestGenerate={(prompt, images) => {
+            onRequestGenerate={(prompt: string, images?: { id: string; alt: string; src: string }[]) => {
               console.log("Generated prompt:", prompt);
               console.log("Image refs:", images);
             }}
