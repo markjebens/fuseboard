@@ -37,18 +37,30 @@ export function ImageNode({ data, selected }: NodeProps) {
 
         <div className="aspect-video rounded-lg overflow-hidden bg-muted border border-border/50 relative group">
           {nodeData?.src ? (
-            <img
-              src={nodeData.src}
-              alt={nodeData?.alt || "image"}
-              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-            />
+            <>
+              <img
+                src={nodeData.src}
+                alt={nodeData?.alt || "image"}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                onError={(e) => {
+                  // Show fallback for broken images (e.g., dead blob URLs)
+                  const target = e.currentTarget;
+                  target.style.display = 'none';
+                }}
+              />
+              {/* Fallback if image fails to load */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground/60 pointer-events-none">
+                <ImageIcon className="w-8 h-8" />
+                <span className="text-xs">Image unavailable</span>
+              </div>
+            </>
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
             </div>
           )}
           {nodeData.uploading && (
-            <div className="absolute inset-0 bg-background/70 flex items-center justify-center text-xs font-medium">
+            <div className="absolute inset-0 bg-background/70 backdrop-blur-sm flex items-center justify-center text-xs font-medium">
               Uploading…
             </div>
           )}
