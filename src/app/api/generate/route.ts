@@ -1,87 +1,142 @@
 import { NextRequest, NextResponse } from "next/server";
 
-interface ImagePayload {
-  base64: string;
-  mime: string;
-  name: string;
-}
-
 interface RequestBody {
   prompt: string;
-  mode?: "auto" | "remix" | "generate";
-  images?: {
-    scene?: ImagePayload;
-    character?: ImagePayload;
-    collage?: ImagePayload;
-  };
-  similarity?: number;
-  provider?: "pollinations" | "ideogram";
+  images?: { url: string; alt: string }[];
+  provider?: "gemini" | "pollinations";
 }
 
-// Helper to strip "data:image/..." prefix if present for Pollinations (it prefers raw prompt or URLs, but we'll use the prompt mostly)
-// Pollinations doesn't support image-to-image well via simple GET, so we'll focus on text-to-image for the free tier
-// unless we use their new POST endpoint if available. For now, we'll use GET for reliability.
+async function urlToBase64(url: string): Promise<{ base64: string; mimeType: string } | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    
+    return { base64, mimeType: contentType };
+  } catch (error) {
+    console.error("Failed to fetch image:", url, error);
+    return null;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
     const body: RequestBody = await request.json();
-    const { prompt, provider = "pollinations", images } = body;
+    const { prompt, images = [], provider = "gemini" } = body;
 
     if (!prompt) {
       return NextResponse.json({ error: "Missing prompt" }, { status: 400 });
     }
 
     // ---------------------------------------------------------
-    // 1. Pollinations.ai (Free, Unlimited)
+    // 1. Google Gemini (Multimodal - understands images + generates)
     // ---------------------------------------------------------
-    if (provider === "pollinations" || !process.env.IDEOGRAM_API_KEY) {
-      // Pollinations is simple: Just a URL. 
-      // To make it feel like an "API", we generate the URL and return it.
-      // We append a random seed to ensure fresh generation.
-      const seed = Math.floor(Math.random() * 1000000);
-      const safePrompt = encodeURIComponent(prompt);
-      // Model 'flux' is usually available and high quality
-      const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
-
-      // We simulate a "job" by just returning this URL. 
-      // The frontend will load it as an <img>.
-      return NextResponse.json({
-        images: [{ url, prompt }],
-        provider: "pollinations",
-        mode: "generate" // Pollinations doesn't support image-ref mixing easily yet
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 2. Ideogram (Premium, requires Key)
-    // ---------------------------------------------------------
-    if (provider === "ideogram" && process.env.IDEOGRAM_API_KEY) {
-      const URL_GENERATE = "https://api.ideogram.ai/v1/ideogram-v3/generate";
-      const fm = new FormData();
-      fm.append("prompt", prompt);
+    if (provider === "gemini" && process.env.GEMINI_API_KEY) {
+      const apiKey = process.env.GEMINI_API_KEY;
       
-      const response = await fetch(URL_GENERATE, {
-        method: "POST",
-        headers: { "Api-Key": process.env.IDEOGRAM_API_KEY! },
-        body: fm,
-      });
+      // Build the request parts
+      const parts: any[] = [];
       
+      // Add images first if any
+      if (images.length > 0) {
+        for (const img of images) {
+          const imageData = await urlToBase64(img.url);
+          if (imageData) {
+            parts.push({
+              inlineData: {
+                mimeType: imageData.mimeType,
+                data: imageData.base64
+              }
+            });
+            // Add context about what this image represents
+            parts.push({ text: `[Reference image: ${img.alt || 'visual reference'}]` });
+          }
+        }
+      }
+      
+      // Add the generation prompt
+      const enhancedPrompt = images.length > 0 
+        ? `Based on the reference images provided above, create a new image that: ${prompt}. 
+           Incorporate the visual style, subjects, and elements from the reference images.
+           Generate a high-quality, professional image.`
+        : `Generate a high-quality, professional image: ${prompt}`;
+      
+      parts.push({ text: enhancedPrompt });
+
+      // Use Gemini 2.0 Flash for image generation
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              responseModalities: ["image", "text"],
+              responseMimeType: "image/png"
+            }
+          })
+        }
+      );
+
       const data = await response.json();
-      if (!response.ok) throw new Error(data?.error || "Ideogram error");
       
+      if (!response.ok) {
+        console.error("Gemini API error:", data);
+        throw new Error(data.error?.message || "Gemini API error");
+      }
+
+      // Extract generated image from response
+      const generatedImages: { url: string; prompt: string }[] = [];
+      
+      if (data.candidates?.[0]?.content?.parts) {
+        for (const part of data.candidates[0].content.parts) {
+          if (part.inlineData?.data) {
+            // Convert base64 to data URL
+            const dataUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+            generatedImages.push({ url: dataUrl, prompt });
+          }
+        }
+      }
+
+      if (generatedImages.length === 0) {
+        // Fall back to Pollinations if Gemini didn't return images
+        console.log("Gemini didn't return images, falling back to Pollinations");
+        return generateWithPollinations(prompt);
+      }
+
       return NextResponse.json({
-        images: data.data?.map((d: { url: string }) => ({ url: d.url, prompt })) || [],
-        provider: "ideogram"
+        images: generatedImages,
+        provider: "gemini",
+        mode: images.length > 0 ? "reference" : "generate"
       });
     }
 
-    return NextResponse.json({ error: "Invalid provider configuration" }, { status: 400 });
+    // ---------------------------------------------------------
+    // 2. Pollinations.ai (Free fallback - text only)
+    // ---------------------------------------------------------
+    return generateWithPollinations(prompt);
 
   } catch (error) {
-    console.error(error);
+    console.error("Generate error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
+}
+
+function generateWithPollinations(prompt: string) {
+  const seed = Math.floor(Math.random() * 1000000);
+  const safePrompt = encodeURIComponent(prompt);
+  const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
+
+  return NextResponse.json({
+    images: [{ url, prompt }],
+    provider: "pollinations",
+    mode: "generate"
+  });
 }

@@ -338,11 +338,25 @@ function GraphInner() {
     setLastStatus(null);
 
     try {
-      console.log("Generating with prompt:", prompt);
+      // Collect image references from canvas nodes
+      const imageRefs = nodes
+        .filter(n => n.type === 'imageNode' && n.data?.src)
+        .map(n => ({
+          url: n.data.src as string,
+          alt: (n.data.alt as string) || 'reference image'
+        }))
+        .filter(img => !img.url.startsWith('blob:')); // Only use uploaded images, not temp blobs
+      
+      console.log("Generating with prompt:", prompt, "images:", imageRefs.length);
+      
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ prompt, provider: 'pollinations' })
+        body: JSON.stringify({ 
+          prompt, 
+          images: imageRefs,
+          provider: 'gemini' // Use Gemini for multimodal generation
+        })
       });
       
       const data = await res.json();
@@ -353,7 +367,7 @@ function GraphInner() {
           url: img.url,
           prompt,
         })));
-        setLastStatus("✓ Generated! Check Library");
+        setLastStatus(`✓ Generated via ${data.provider}!`);
         openGenerated();
       } else {
         throw new Error(data.error || "No images returned");
