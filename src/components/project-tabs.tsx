@@ -27,7 +27,7 @@ export function ProjectTabs() {
           className={cn(
             "group flex items-center gap-2 px-4 py-2 rounded-full border cursor-pointer transition-all duration-200",
             (activeId ?? projects[0].id) === p.id
-              ? "bg-gradient-to-r from-primary to-accent text-primary-foreground border-transparent font-semibold shadow-glow"
+              ? "bg-primary text-primary-foreground border-transparent font-semibold shadow-sm"
               : "bg-secondary border-border hover:bg-secondary/80 text-secondary-foreground"
           )}
           onClick={() => setActive(p.id)}
