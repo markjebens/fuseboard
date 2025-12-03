@@ -16,8 +16,7 @@ import { Button } from "@/components/ui/button";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function Dashboard() {
-  const { active, init, isLoading } = useProjects();
-  const p = active();
+  const { init, isLoading } = useProjects();
   const [showGen, setShowGen] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const supabase = createClient();
@@ -104,13 +103,7 @@ export default function Dashboard() {
              </div>
           ) : null}
           
-          <Graph
-            projectId={p?.id || "default"}
-            onRequestGenerate={(prompt: string, images?: { id: string; alt: string; src: string }[]) => {
-              console.log("Generated prompt:", prompt);
-              console.log("Image refs:", images);
-            }}
-          />
+          <Graph />
         </section>
       </main>
 

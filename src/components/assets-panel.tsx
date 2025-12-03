@@ -13,18 +13,53 @@ import {
   Plus,
   Trash2,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { useProjects } from "@/store/use-projects";
 import { useUI } from "@/store/use-ui";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Need to install tabs
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { Node } from "@xyflow/react";
 import { createClient } from "@/lib/supabase/client";
 
 interface AssetsPanelProps {
   onOpenGenerated?: () => void;
-  onDragPreset?: (preset: any) => void; // New prop to handle dragging presets
+  onDragPreset?: (preset: any) => void;
+}
+
+// Image component with error handling
+function AssetImage({ src, alt }: { src?: string; alt?: string }) {
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  if (!src || error) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-secondary">
+        <AlertTriangle className="w-4 h-4 text-muted-foreground/50" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-secondary">
+          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground/50" />
+        </div>
+      )}
+      <img
+        src={src}
+        alt={alt || "asset"}
+        className={cn("w-full h-full object-cover", loading && "opacity-0")}
+        onLoad={() => setLoading(false)}
+        onError={() => {
+          console.error("Failed to load image:", src);
+          setError(true);
+          setLoading(false);
+        }}
+      />
+    </>
+  );
 }
 
 export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps) {
@@ -46,20 +81,33 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
       if (error || !user) {
         throw new Error("You must be signed in to upload assets.");
       }
-      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-      const path = `${user.id}/library/${Date.now()}-${sanitizedName}`;
-      const { error: uploadError } = await supabase.storage
+      
+      // Create a clean filename
+      const ext = file.name.split('.').pop() || 'jpg';
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2, 8);
+      const path = `${user.id}/library/${timestamp}-${randomId}.${ext}`;
+      
+      console.log("Uploading file to path:", path);
+      
+      const { error: uploadError, data: uploadData } = await supabase.storage
         .from("assets")
         .upload(path, file, {
           cacheControl: "3600",
           upsert: false,
         });
+        
       if (uploadError) {
+        console.error("Upload error:", uploadError);
         throw uploadError;
       }
-      const { data } = supabase.storage.from("assets").getPublicUrl(path);
-      console.log("Uploaded to storage:", path, "-> URL:", data.publicUrl);
-      return data.publicUrl;
+      
+      console.log("Upload successful:", uploadData);
+      
+      const { data: urlData } = supabase.storage.from("assets").getPublicUrl(path);
+      console.log("Public URL:", urlData.publicUrl);
+      
+      return urlData.publicUrl;
     },
     [supabase]
   );
@@ -68,10 +116,15 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
     async (files: FileList | File[]) => {
       const fileArray = Array.from(files);
       if (!fileArray.length) return;
+      
       setIsUploading(true);
+      
       try {
         const uploads: { type: "image" | "video"; url: string; name: string }[] = [];
+        
         for (const file of fileArray) {
+          console.log("Processing file:", file.name, file.type);
+          
           if (file.type.startsWith("image/")) {
             const url = await uploadFileToStorage(file);
             uploads.push({ type: "image", url, name: file.name });
@@ -80,13 +133,14 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
             uploads.push({ type: "video", url, name: file.name });
           }
         }
+        
         if (uploads.length) {
-          console.log("Adding assets to library:", uploads);
+          console.log("Adding assets to store:", uploads);
           await addAssets(uploads);
         }
       } catch (err) {
-        console.error("Upload failed", err);
-        alert("Failed to upload asset. Please try again.");
+        console.error("Upload failed:", err);
+        alert("Failed to upload: " + (err instanceof Error ? err.message : "Unknown error"));
       } finally {
         setIsUploading(false);
       }
@@ -203,17 +257,13 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
                 <GripVertical className="w-4 h-4 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity" />
                 
                 {a.type === "image" && (
-                  <div className="w-10 h-10 rounded-md overflow-hidden bg-secondary border border-border flex-shrink-0">
-                    <img
-                      src={a.url}
-                      alt={a.name}
-                      className="w-full h-full object-cover"
-                    />
+                  <div className="w-10 h-10 rounded-md overflow-hidden bg-secondary border border-border flex-shrink-0 relative">
+                    <AssetImage src={a.url} alt={a.name} />
                   </div>
                 )}
                 {a.type === "video" && (
-                  <div className="w-10 h-10 rounded-md overflow-hidden bg-secondary border border-border flex-shrink-0">
-                    <video src={a.url} className="w-full h-full object-cover" />
+                  <div className="w-10 h-10 rounded-md overflow-hidden bg-secondary border border-border flex-shrink-0 flex items-center justify-center">
+                    <Video className="w-5 h-5 text-muted-foreground" />
                   </div>
                 )}
                 {a.type === "text" && (
@@ -273,7 +323,6 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
                 className="group relative flex items-center gap-3 p-3 bg-background rounded-xl border border-border hover:border-primary/50 cursor-grab active:cursor-grabbing transition-all duration-200 shadow-sm"
                 draggable
                 onDragStart={(e) => {
-                  // Pass preset ID or data to the graph
                   e.dataTransfer.setData("application/x-preset", JSON.stringify(preset));
                 }}
               >

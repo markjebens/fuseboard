@@ -30,12 +30,9 @@ import {
   Loader2,
   Wand2,
   Save,
-  Settings2,
-  Download,
   Sparkles,
   Palette,
   User,
-  CheckCircle2
 } from "lucide-react";
 
 import { useProjects } from "@/store/use-projects";
@@ -54,146 +51,140 @@ const nodeTypes = {
   textNode: TextNode,
 };
 
-const EDGE_COLOR = "var(--muted-foreground)";
-
-// Helper functions
-async function objectUrlToBase64(url: string) {
-  try {
-    const r = await fetch(url);
-    const blob = await r.blob();
-    const buf = await blob.arrayBuffer();
-    let binary = "";
-    const bytes = new Uint8Array(buf);
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-    }
-    return { base64: btoa(binary), mime: blob.type || "image/png" };
-  } catch (e) {
-    console.warn("Failed to convert blob to base64", e);
-    return null;
-  }
-}
-
-function normLine(s: string) {
-  return s.replace(/\s+/g, " ").replace(/\s([,.;:!?])/g, "$1").trim();
-}
-function dedupeLines(lines: string[]) {
-  const seen = new Set<string>();
-  return lines.filter((l) => {
-    const k = l.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-}
-function buildSimplePrompt(nodes: Node[]) {
-  const texts = nodes
-    .filter(n => n.type === 'textNode')
-    .map(n => (n.data?.text as string) || "")
-    .join(", ");
-  const imgs = nodes.filter(n => n.type === 'imageNode').map(n => (n.data?.alt as string) || "image").join(", ");
-  return [texts, imgs].filter(Boolean).join(" ");
-}
-
 const supabase = createClient();
 
-async function uploadMediaToStorage(file: File, folder: string) {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+// Upload helper
+async function uploadMediaToStorage(file: File) {
+  const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) throw new Error("Please sign in again.");
 
-  const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-  const path = `${user.id}/${folder}/${Date.now()}-${sanitizedName}`;
+  const ext = file.name.split('.').pop() || 'jpg';
+  const timestamp = Date.now();
+  const randomId = Math.random().toString(36).substring(2, 8);
+  const path = `${user.id}/canvas/${timestamp}-${randomId}.${ext}`;
+  
   const { error: uploadError } = await supabase.storage
     .from("assets")
-    .upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-    });
+    .upload(path, file, { cacheControl: "3600", upsert: false });
+    
   if (uploadError) throw uploadError;
+  
   const { data } = supabase.storage.from("assets").getPublicUrl(path);
   return data.publicUrl;
 }
 
-function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGenerate?: any }) {
-  const { active, setGraph: setGraphStore, markGenerated: markGeneratedStore, addGenerated, savePreset, init } = useProjects();
+// Build prompt from nodes
+function buildSimplePrompt(nodes: Node[]) {
+  const texts = nodes
+    .filter(n => n.type === 'textNode')
+    .map(n => (n.data?.text as string) || "")
+    .filter(Boolean);
+  const imgs = nodes
+    .filter(n => n.type === 'imageNode')
+    .map(n => (n.data?.alt as string) || "image reference")
+    .filter(Boolean);
+  return [...texts, ...imgs].join(", ");
+}
+
+function GraphInner() {
+  const { 
+    active, 
+    activeId,
+    setGraph: setGraphStore, 
+    addGenerated, 
+    savePreset 
+  } = useProjects();
   const { setGenHint, openGenerated } = useUI(); 
   const reactFlowInstance = useReactFlow();
 
-  // Get the active project from store - this ensures we are always viewing the correct project data
+  // Get the active project
   const project = active();
 
+  // UI State
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [presetType, setPresetType] = useState<"theme" | "character">("theme");
-
-  // Initialize nodes from the project store
-  const [nodes, setNodes, onNodesChange] = useNodesState(project.nodes || []);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(project.edges || []);
-  
-  // Manual debounce state to allow immediate reset on project switch
-  const [debouncedNodes, setDebouncedNodes] = useState(nodes);
-  const [debouncedEdges, setDebouncedEdges] = useState(edges);
-  
-  // Track last project ID
-  const lastProjectIdRef = useRef(project.id);
-
-  // Sync nodes/edges when project changes
-  useEffect(() => {
-    // Always sync when project ID changes
-    if (project.id !== lastProjectIdRef.current) {
-        console.log("Switching to project:", project.id, "with", project.nodes?.length || 0, "nodes");
-        setNodes(project.nodes || []);
-        setEdges(project.edges || []);
-        setDebouncedNodes(project.nodes || []);
-        setDebouncedEdges(project.edges || []);
-        lastProjectIdRef.current = project.id;
-    }
-  }, [project.id, setNodes, setEdges]); 
-
-  // Debounce Logic for Nodes
-  useEffect(() => {
-    const handler = setTimeout(() => {
-        setDebouncedNodes(nodes);
-    }, 1000);
-    return () => clearTimeout(handler);
-  }, [nodes]);
-
-  // Debounce Logic for Edges
-  useEffect(() => {
-    const handler = setTimeout(() => {
-        setDebouncedEdges(edges);
-    }, 1000);
-    return () => clearTimeout(handler);
-  }, [edges]);
-
-  // Save Logic
-  useEffect(() => {
-    if (project.id) {
-        setGraphStore({ nodes: debouncedNodes, edges: debouncedEdges });
-    }
-  }, [debouncedNodes, debouncedEdges, setGraphStore, project.id]);
-
   const [connectLabel, setConnectLabel] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = useMemo(() => nodes.find((n) => n.id === selectedId) || null, [nodes, selectedId]);
-  const fileRef = useRef<HTMLInputElement>(null);
-
   const [promptPreview, setPromptPreview] = useState("");
   const [isRefining, setIsRefining] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastStatus, setLastStatus] = useState<string | null>(null);
 
-  // Initialize store on mount
-  useEffect(() => {
-    init();
-  }, []);
+  // React Flow state - initialize empty, will sync from project
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  
+  // Track which project we're synced to
+  const syncedProjectIdRef = useRef<string | null>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
+  // CRITICAL: Sync nodes/edges when project changes or project data loads
+  useEffect(() => {
+    const currentProjectId = project?.id;
+    const currentNodes = project?.nodes || [];
+    const currentEdges = project?.edges || [];
+    
+    // Check if we need to sync (project changed OR data just loaded)
+    const projectChanged = currentProjectId !== syncedProjectIdRef.current;
+    const dataLoaded = syncedProjectIdRef.current === currentProjectId && 
+                       nodes.length === 0 && 
+                       currentNodes.length > 0;
+    
+    if (projectChanged || dataLoaded) {
+      console.log("Syncing canvas to project:", currentProjectId, 
+                  "nodes:", currentNodes.length, 
+                  "edges:", currentEdges.length);
+      
+      // Clear any pending saves for old project
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      
+      // Update React Flow state
+      setNodes(currentNodes);
+      setEdges(currentEdges);
+      syncedProjectIdRef.current = currentProjectId;
+      
+      // Clear prompt preview for new project
+      setPromptPreview("");
+      setSelectedId(null);
+    }
+  }, [project?.id, project?.nodes, project?.edges, nodes.length, setNodes, setEdges]);
+
+  // Save to store with debounce
+  useEffect(() => {
+    // Don't save if we haven't synced yet or if project just changed
+    if (!syncedProjectIdRef.current || syncedProjectIdRef.current !== project?.id) {
+      return;
+    }
+    
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    // Debounce save
+    saveTimeoutRef.current = setTimeout(() => {
+      console.log("Saving graph for project:", project?.id, "nodes:", nodes.length);
+      setGraphStore({ nodes, edges });
+    }, 1500);
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [nodes, edges, project?.id, setGraphStore]);
+
+  // Computed
+  const selected = useMemo(() => nodes.find((n) => n.id === selectedId) || null, [nodes, selectedId]);
+
+  // Handlers
   const onConnect = useCallback(
     (params: Connection) =>
       setEdges((eds) =>
@@ -213,75 +204,76 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
     [setEdges, connectLabel]
   );
 
-  // Node helpers
   const addTextNode = useCallback(() => {
     const id = nanoid(8);
-    const pos = { x: 200, y: 200 }; 
     setNodes((nds) => [
       ...nds,
       {
         id,
         type: "textNode",
-        position: pos, 
+        position: { x: 200, y: 200 }, 
         data: { text: "New descriptor", tags: [] },
       },
     ]);
   }, [setNodes]);
 
   const addImageNode = useCallback(() => fileRef.current?.click(), []);
+  
   const createImageNodeFromFile = useCallback(
-    (file: File, pos?: { x: number; y: number }) => {
+    async (file: File, pos?: { x: number; y: number }) => {
       const id = nanoid(8);
       const objectUrl = URL.createObjectURL(file);
       const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
 
+      // Add node with temporary blob URL
       setNodes((nds) => [
         ...nds,
         {
           id,
           type: "imageNode",
           position: pos || { x: 100, y: 100 },
-          data: { src: objectUrl, srcKind: "objectURL", alt: cleanName, note: "", uploading: true },
+          data: { src: objectUrl, alt: cleanName, note: "", uploading: true },
         },
       ]);
 
-      uploadMediaToStorage(file, "canvas")
-        .then((publicUrl) => {
-          URL.revokeObjectURL(objectUrl);
-          setNodes((nds) =>
-            nds.map((n) =>
-              n.id === id ? { ...n, data: { ...n.data, src: publicUrl, uploading: false } } : n
-            )
-          );
-        })
-        .catch((err) => {
-          console.error("Failed to upload image", err);
-          setNodes((nds) =>
-            nds.map((n) =>
-              n.id === id ? { ...n, data: { ...n.data, uploadError: true, uploading: false } } : n
-            )
-          );
-        });
+      try {
+        // Upload to Supabase
+        const publicUrl = await uploadMediaToStorage(file);
+        URL.revokeObjectURL(objectUrl);
+        
+        // Update node with permanent URL
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, src: publicUrl, uploading: false } } : n
+          )
+        );
+      } catch (err) {
+        console.error("Failed to upload image", err);
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, uploadError: true, uploading: false } } : n
+          )
+        );
+      }
     },
     [setNodes]
   );
 
   const onFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      createImageNodeFromFile(file);
-      e.target.value = "";
-    }, [createImageNodeFromFile]);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    createImageNodeFromFile(file);
+    e.target.value = "";
+  }, [createImageNodeFromFile]);
 
-  // Selection
   const onSelectionChange = useCallback(({ nodes: n }: { nodes: Node[] }) => {
     setSelectedId(n && n.length ? n[0].id : null);
   }, []);
 
   const updateSelectedData = useCallback((patch: Record<string, unknown>) => {
-      if (!selected) return;
-      setNodes((nds) => nds.map((n) => (n.id === selected.id ? { ...n, data: { ...n.data, ...patch } } : n)));
-    }, [selected, setNodes]);
+    if (!selected) return;
+    setNodes((nds) => nds.map((n) => (n.id === selected.id ? { ...n, data: { ...n.data, ...patch } } : n)));
+  }, [selected, setNodes]);
 
   const deleteSelected = useCallback(() => {
     if (!selected) return;
@@ -290,76 +282,72 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
     setSelectedId(null);
   }, [selected, setEdges, setNodes]);
 
-
   // AI Features
   const handleRefinePrompt = useCallback(async () => {
     setIsRefining(true);
     try {
-        const crudePrompt = buildSimplePrompt(nodes);
-        
-        const res = await fetch('/api/refine', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ prompt: crudePrompt })
-        });
-        const data = await res.json();
-        if (data.refined) {
-            setPromptPreview(data.refined);
-        } else {
-            setPromptPreview(crudePrompt); // fallback
-        }
-    } catch (e) {
-        console.error(e);
-        setPromptPreview(buildSimplePrompt(nodes));
-    } finally {
+      const crudePrompt = buildSimplePrompt(nodes);
+      if (!crudePrompt) {
+        setPromptPreview("Add some nodes to the canvas first!");
         setIsRefining(false);
+        return;
+      }
+      
+      const res = await fetch('/api/refine', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ prompt: crudePrompt })
+      });
+      const data = await res.json();
+      setPromptPreview(data.refined || crudePrompt);
+    } catch (e) {
+      console.error(e);
+      setPromptPreview(buildSimplePrompt(nodes));
+    } finally {
+      setIsRefining(false);
     }
   }, [nodes]);
 
   const handleGenerate = useCallback(async () => {
-      const prompt = promptPreview.trim() || buildSimplePrompt(nodes);
-      if (!prompt) {
-          alert("Please add some nodes or text first!");
-          return;
-      }
+    const prompt = promptPreview.trim() || buildSimplePrompt(nodes);
+    if (!prompt) {
+      alert("Please add some nodes or write a prompt first!");
+      return;
+    }
+    
+    setIsGenerating(true);
+    setGenHint(true);
+    setLastStatus(null);
+
+    try {
+      console.log("Generating with prompt:", prompt);
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ prompt, provider: 'pollinations' })
+      });
       
-      setIsGenerating(true);
-      setGenHint(true);
-      setLastStatus(null);
+      const data = await res.json();
+      console.log("Generation result:", data);
 
-      try {
-          console.log("Starting generation for prompt:", prompt);
-          const res = await fetch('/api/generate', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ 
-                  prompt, 
-                  provider: 'pollinations' 
-              })
-          });
-          
-          const data = await res.json();
-          console.log("Generation result:", data);
-
-          if (data.images) {
-              await addGenerated(data.images.map((img: any) => ({
-                  url: img.url,
-                  prompt,
-              })));
-              setLastStatus("Success! Check Library.");
-              // Ideally, open the library or show a preview
-          } else {
-              throw new Error(data.error || "No images returned");
-          }
-      } catch (e: any) {
-          console.error("Generation failed:", e);
-          alert("Generation failed: " + (e.message || e));
-          setLastStatus("Failed");
-      } finally {
-          setIsGenerating(false);
+      if (data.images && data.images.length > 0) {
+        await addGenerated(data.images.map((img: any) => ({
+          url: img.url,
+          prompt,
+        })));
+        setLastStatus("✓ Generated! Check Library");
+        openGenerated();
+      } else {
+        throw new Error(data.error || "No images returned");
       }
-  }, [promptPreview, nodes, addGenerated, setGenHint]);
-
+    } catch (e: any) {
+      console.error("Generation failed:", e);
+      setLastStatus("✗ Failed");
+      alert("Generation failed: " + (e.message || e));
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [promptPreview, nodes, addGenerated, setGenHint, openGenerated]);
 
   // Drag & Drop
   const onDragOver = useCallback((evt: React.DragEvent) => {
@@ -367,70 +355,76 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
     evt.dataTransfer.dropEffect = "copy";
   }, []);
 
-  const onDrop = useCallback((evt: React.DragEvent) => {
-      evt.preventDefault();
-      const bounds = evt.currentTarget.getBoundingClientRect();
-      const pos = reactFlowInstance.screenToFlowPosition({ x: evt.clientX, y: evt.clientY });
+  const onDrop = useCallback(async (evt: React.DragEvent) => {
+    evt.preventDefault();
+    const pos = reactFlowInstance.screenToFlowPosition({ x: evt.clientX, y: evt.clientY });
 
-      const presetPayload = evt.dataTransfer.getData("application/x-preset");
-      if (presetPayload) {
-          try {
-              const preset = JSON.parse(presetPayload);
-              const newNodes = preset.nodes.map((n: any) => ({
-                  ...n,
-                  id: nanoid(),
-                  position: { x: n.position.x + pos.x, y: n.position.y + pos.y },
-                  selected: true
-              }));
-              setNodes((nds) => [...nds, ...newNodes]);
-              return;
-          } catch {}
-      }
+    // Handle preset drops
+    const presetPayload = evt.dataTransfer.getData("application/x-preset");
+    if (presetPayload) {
+      try {
+        const preset = JSON.parse(presetPayload);
+        const newNodes = preset.nodes.map((n: any) => ({
+          ...n,
+          id: nanoid(),
+          position: { x: n.position.x + pos.x, y: n.position.y + pos.y },
+          selected: true
+        }));
+        setNodes((nds) => [...nds, ...newNodes]);
+        return;
+      } catch {}
+    }
 
-      const assetPayload = evt.dataTransfer.getData("application/x-asset");
-      if (assetPayload) {
-        try {
-          const asset = JSON.parse(assetPayload);
-          if (asset.type === "image" && asset.url) {
-            const id = nanoid(8);
-            setNodes((nds) => [
-              ...nds,
-              {
-                id,
-                type: "imageNode",
-                position: pos,
-                data: { src: asset.url, alt: asset.name || "image" },
-              },
-            ]);
-            return;
-          }
-          if (asset.type === "text" && asset.text) {
-            const id = nanoid(8);
-            setNodes((nds) => [
-              ...nds,
-              {
-                id,
-                type: "textNode",
-                position: pos,
-                data: { text: asset.text, tags: asset.tags || [] },
-              },
-            ]);
-            return;
-          }
-        } catch {}
-      }
-      
-      if (evt.dataTransfer.files?.length) {
-          createImageNodeFromFile(evt.dataTransfer.files[0], pos);
-      }
-    }, [createImageNodeFromFile, setNodes, reactFlowInstance]);
+    // Handle asset drops
+    const assetPayload = evt.dataTransfer.getData("application/x-asset");
+    if (assetPayload) {
+      try {
+        const asset = JSON.parse(assetPayload);
+        if (asset.type === "image" && asset.url) {
+          setNodes((nds) => [
+            ...nds,
+            {
+              id: nanoid(8),
+              type: "imageNode",
+              position: pos,
+              data: { src: asset.url, alt: asset.name || "image" },
+            },
+          ]);
+          return;
+        }
+        if (asset.type === "text" && asset.text) {
+          setNodes((nds) => [
+            ...nds,
+            {
+              id: nanoid(8),
+              type: "textNode",
+              position: pos,
+              data: { text: asset.text, tags: asset.tags || [] },
+            },
+          ]);
+          return;
+        }
+      } catch {}
+    }
+    
+    // Handle file drops
+    if (evt.dataTransfer.files?.length) {
+      await createImageNodeFromFile(evt.dataTransfer.files[0], pos);
+    }
+  }, [createImageNodeFromFile, setNodes, reactFlowInstance]);
 
-    const handleSavePreset = () => {
-        if (!presetName) return;
-        savePreset(presetName, presetType, nodes, edges);
-        setSaveDialogOpen(false);
-        setPresetName("");
-    };
+  const handleSavePreset = () => {
+    if (!presetName) return;
+    savePreset(presetName, presetType, nodes, edges);
+    setSaveDialogOpen(false);
+    setPresetName("");
+  };
+
+  const handleResetCanvas = () => {
+    if (nodes.length > 0 && !confirm("Clear all nodes from the canvas?")) return;
+    setNodes([]);
+    setEdges([]);
+  };
 
   return (
     <div className="h-full w-full relative">
@@ -456,7 +450,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
             
             <div className="h-px bg-border/50 my-2" />
             
-             <div className="pt-1">
+            <div className="pt-1">
               <label className="text-[10px] text-muted-foreground mb-1.5 block uppercase tracking-wide">Connection Label</label>
               <Input
                 placeholder="relationship..."
@@ -467,11 +461,11 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
             </div>
 
             <Button variant="outline" size="sm" className="w-full mt-2 text-xs" onClick={() => setSaveDialogOpen(true)}>
-                <Save className="w-3 h-3 mr-2" />
-                Save as Theme
+              <Save className="w-3 h-3 mr-2" />
+              Save as Theme
             </Button>
-            <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground hover:text-destructive" onClick={() => setNodes([])}>
-                Reset Canvas
+            <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground hover:text-destructive" onClick={handleResetCanvas}>
+              Reset Canvas
             </Button>
           </div>
         )}
@@ -490,91 +484,91 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
           <div className="p-4 space-y-4 overflow-y-auto flex-1">
             {/* AI Prompt Section */}
             <div className="bg-card border border-border rounded-xl p-4 space-y-3 shadow-sm">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-amber-500" />
-                        <h4 className="font-medium text-sm">AI Prompt Agent</h4>
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPromptPreview("")}>
-                        <Trash2 className="w-3 h-3" />
-                    </Button>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <h4 className="font-medium text-sm">AI Prompt Agent</h4>
                 </div>
-                
-                <Textarea 
-                    value={promptPreview}
-                    onChange={e => setPromptPreview(e.target.value)}
-                    placeholder="Describe your vision or use Refine to auto-generate..."
-                    className="text-xs min-h-[100px] bg-background/50 resize-none"
-                />
-                
-                <div className="grid grid-cols-2 gap-2">
-                    <Button 
-                        variant="secondary" 
-                        size="sm" 
-                        className="text-xs h-8"
-                        onClick={handleRefinePrompt}
-                        disabled={isRefining}
-                    >
-                        {isRefining ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
-                        Refine
-                    </Button>
-                    <Button 
-                        variant="default" 
-                        size="sm" 
-                        className="text-xs h-8 bg-foreground text-background hover:bg-foreground/90 relative overflow-hidden"
-                        onClick={handleGenerate}
-                        disabled={isGenerating}
-                    >
-                         {isGenerating ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Zap className="w-3 h-3 mr-2" />}
-                        Generate
-                    </Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPromptPreview("")}>
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              </div>
+              
+              <Textarea 
+                value={promptPreview}
+                onChange={e => setPromptPreview(e.target.value)}
+                placeholder="Describe your vision or use Refine to auto-generate from canvas..."
+                className="text-xs min-h-[100px] bg-background/50 resize-none"
+              />
+              
+              <div className="grid grid-cols-2 gap-2">
+                <Button 
+                  variant="secondary" 
+                  size="sm" 
+                  className="text-xs h-8"
+                  onClick={handleRefinePrompt}
+                  disabled={isRefining}
+                >
+                  {isRefining ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
+                  Refine
+                </Button>
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  className="text-xs h-8 bg-foreground text-background hover:bg-foreground/90"
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Zap className="w-3 h-3 mr-2" />}
+                  Generate
+                </Button>
+              </div>
+              {lastStatus && (
+                <div className={cn("text-[10px] text-center font-medium", lastStatus.includes("✓") ? "text-green-500" : "text-red-500")}>
+                  {lastStatus}
                 </div>
-                {lastStatus && (
-                  <div className={cn("text-[10px] text-center font-medium animate-pulse", lastStatus.includes("Success") ? "text-green-500" : "text-red-500")}>
-                    {lastStatus}
-                  </div>
-                )}
+              )}
             </div>
 
             {/* Node Editor */}
             {selected ? (
-                <div className="space-y-3 animate-fade-in">
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-muted-foreground">Editing: {selected.type}</span>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={deleteSelected}>
-                            <Trash2 className="w-3 h-3" />
-                        </Button>
-                    </div>
-                    
-                    {selected.type === 'textNode' && (
-                        <Textarea 
-                            value={selected.data.text as string} 
-                            onChange={e => updateSelectedData({text: e.target.value})}
-                            className="text-sm min-h-[80px]"
-                            placeholder="Enter descriptor..."
-                        />
-                    )}
-                     {selected.type === 'imageNode' && (
-                        <div className="space-y-2">
-                             <Input 
-                                value={selected.data.alt as string}
-                                onChange={e => updateSelectedData({alt: e.target.value})}
-                                placeholder="Image name/role..."
-                                className="h-8"
-                            />
-                             <Textarea 
-                                value={selected.data.note as string || ""} 
-                                onChange={e => updateSelectedData({note: e.target.value})}
-                                className="text-xs min-h-[60px]"
-                                placeholder="Notes for AI..."
-                            />
-                        </div>
-                    )}
+              <div className="space-y-3 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground">Editing: {selected.type}</span>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={deleteSelected}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
                 </div>
+                
+                {selected.type === 'textNode' && (
+                  <Textarea 
+                    value={selected.data.text as string} 
+                    onChange={e => updateSelectedData({text: e.target.value})}
+                    className="text-sm min-h-[80px]"
+                    placeholder="Enter descriptor..."
+                  />
+                )}
+                {selected.type === 'imageNode' && (
+                  <div className="space-y-2">
+                    <Input 
+                      value={selected.data.alt as string}
+                      onChange={e => updateSelectedData({alt: e.target.value})}
+                      placeholder="Image name/role..."
+                      className="h-8"
+                    />
+                    <Textarea 
+                      value={selected.data.note as string || ""} 
+                      onChange={e => updateSelectedData({note: e.target.value})}
+                      className="text-xs min-h-[60px]"
+                      placeholder="Notes for AI..."
+                    />
+                  </div>
+                )}
+              </div>
             ) : (
-                <div className="text-center py-8 text-xs text-muted-foreground border-2 border-dashed border-border rounded-xl">
-                    Select a node to edit
-                </div>
+              <div className="text-center py-8 text-xs text-muted-foreground border-2 border-dashed border-border rounded-xl">
+                Select a node to edit
+              </div>
             )}
           </div>
         )}
@@ -600,48 +594,48 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
 
       {/* Save Preset Dialog */}
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-          <DialogContent>
-              <DialogHeader>
-                  <DialogTitle>Save Theme / Character</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                      <label className="text-sm font-medium">Name</label>
-                      <Input value={presetName} onChange={e => setPresetName(e.target.value)} placeholder="e.g. Noir Detective Style" />
-                  </div>
-                   <div className="space-y-2">
-                      <label className="text-sm font-medium">Type</label>
-                      <div className="flex gap-2">
-                          <Button 
-                            variant={presetType === 'theme' ? 'default' : 'outline'} 
-                            onClick={() => setPresetType('theme')}
-                            className="flex-1"
-                           >
-                              <Palette className="w-4 h-4 mr-2" /> Theme
-                           </Button>
-                           <Button 
-                            variant={presetType === 'character' ? 'default' : 'outline'} 
-                            onClick={() => setPresetType('character')}
-                            className="flex-1"
-                           >
-                              <User className="w-4 h-4 mr-2" /> Character
-                           </Button>
-                      </div>
-                  </div>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Theme / Character</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name</label>
+              <Input value={presetName} onChange={e => setPresetName(e.target.value)} placeholder="e.g. Noir Detective Style" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Type</label>
+              <div className="flex gap-2">
+                <Button 
+                  variant={presetType === 'theme' ? 'default' : 'outline'} 
+                  onClick={() => setPresetType('theme')}
+                  className="flex-1"
+                >
+                  <Palette className="w-4 h-4 mr-2" /> Theme
+                </Button>
+                <Button 
+                  variant={presetType === 'character' ? 'default' : 'outline'} 
+                  onClick={() => setPresetType('character')}
+                  className="flex-1"
+                >
+                  <User className="w-4 h-4 mr-2" /> Character
+                </Button>
               </div>
-              <DialogFooter>
-                  <Button onClick={handleSavePreset}>Save to Library</Button>
-              </DialogFooter>
-          </DialogContent>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={handleSavePreset}>Save to Library</Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );
 }
 
-export function Graph(props: any) {
+export function Graph() {
   return (
     <ReactFlowProvider>
-      <GraphInner {...props} />
+      <GraphInner />
     </ReactFlowProvider>
   );
 }
