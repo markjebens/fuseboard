@@ -109,7 +109,7 @@ function useDebounce(value: any, delay: number) {
 
 function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGenerate?: any }) {
   const { active, setGraph: setGraphStore, markGenerated: markGeneratedStore, addGenerated, savePreset, init } = useProjects();
-  const { setGenHint, setOpenGenerated } = useUI(); // Added setOpenGenerated
+  const { setGenHint, openGenerated } = useUI(); // Fixed name
   const reactFlowInstance = useReactFlow();
 
   // Get the active project from store - this ensures we are always viewing the correct project data
