@@ -54,7 +54,7 @@ interface ProjectsState {
   addAssets: (assets: Omit<Asset, "id">[]) => void;
   setGraph: (graph: { nodes: Node[]; edges: Edge[] }) => void;
   markGenerated: (payload: Project["lastGenerated"]) => void;
-  addGenerated: (items: Omit<GeneratedItem, "id">[]) => void;
+  addGenerated: (items: Omit<GeneratedItem, "id" | "createdAt">[]) => void;
   
   // ✅ Preset Actions
   savePreset: (name: string, type: "theme" | "character", nodes: Node[], edges: Edge[]) => void;
@@ -136,9 +136,9 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   addGenerated(items) {
     const p = get().active();
     const toAdd = items.map((it) => ({
+      ...it,
       id: nanoid(),
       createdAt: Date.now(),
-      ...it,
     }));
     set((s) => ({
       projects: s.projects.map((pr) =>
