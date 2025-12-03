@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import { ImageNode } from "./image-node";
 import { TextNode } from "./text-node";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { createClient } from "@/lib/supabase/client";
 
 const nodeTypes = {
   imageNode: ImageNode,
@@ -93,6 +94,28 @@ function buildSimplePrompt(nodes: Node[]) {
     .join(", ");
   const imgs = nodes.filter(n => n.type === 'imageNode').map(n => (n.data?.alt as string) || "image").join(", ");
   return [texts, imgs].filter(Boolean).join(" ");
+}
+
+const supabase = createClient();
+
+async function uploadMediaToStorage(file: File, folder: string) {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user) throw new Error("Please sign in again.");
+
+  const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+  const path = `${user.id}/${folder}/${Date.now()}-${sanitizedName}`;
+  const { error: uploadError } = await supabase.storage
+    .from("assets")
+    .upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+    });
+  if (uploadError) throw uploadError;
+  const { data } = supabase.storage.from("assets").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGenerate?: any }) {
@@ -215,10 +238,10 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   }, [setNodes]);
 
   const addImageNode = useCallback(() => fileRef.current?.click(), []);
-  const createImageNodeFromFile = useCallback((file: File, pos?: { x: number; y: number }) => {
+  const createImageNodeFromFile = useCallback(
+    (file: File, pos?: { x: number; y: number }) => {
       const id = nanoid(8);
       const objectUrl = URL.createObjectURL(file);
-      // Clean filename: remove extension, replace delimiters with space
       const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
 
       setNodes((nds) => [
@@ -227,10 +250,30 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
           id,
           type: "imageNode",
           position: pos || { x: 100, y: 100 },
-          data: { src: objectUrl, srcKind: "objectURL", alt: cleanName, note: "" },
+          data: { src: objectUrl, srcKind: "objectURL", alt: cleanName, note: "", uploading: true },
         },
       ]);
-    }, [setNodes]);
+
+      uploadMediaToStorage(file, "canvas")
+        .then((publicUrl) => {
+          URL.revokeObjectURL(objectUrl);
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === id ? { ...n, data: { ...n.data, src: publicUrl, uploading: false } } : n
+            )
+          );
+        })
+        .catch((err) => {
+          console.error("Failed to upload image", err);
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === id ? { ...n, data: { ...n.data, uploadError: true, uploading: false } } : n
+            )
+          );
+        });
+    },
+    [setNodes]
+  );
 
   const onFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -357,20 +400,30 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
       if (assetPayload) {
         try {
           const asset = JSON.parse(assetPayload);
-          if (asset.type === "image" && asset.blobUrl) {
+          if (asset.type === "image" && asset.url) {
             const id = nanoid(8);
-            setNodes((nds) => [...nds, {
-                id, type: "imageNode", position: pos,
-                data: { src: asset.blobUrl, srcKind: "objectURL", alt: asset.name || "image" },
-            }]);
+            setNodes((nds) => [
+              ...nds,
+              {
+                id,
+                type: "imageNode",
+                position: pos,
+                data: { src: asset.url, alt: asset.name || "image" },
+              },
+            ]);
             return;
           }
           if (asset.type === "text" && asset.text) {
             const id = nanoid(8);
-            setNodes((nds) => [...nds, {
-                id, type: "textNode", position: pos,
+            setNodes((nds) => [
+              ...nds,
+              {
+                id,
+                type: "textNode",
+                position: pos,
                 data: { text: asset.text, tags: asset.tags || [] },
-            }]);
+              },
+            ]);
             return;
           }
         } catch {}

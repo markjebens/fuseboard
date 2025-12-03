@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Image as ImageIcon,
   Video,
@@ -12,6 +12,7 @@ import {
   User,
   Plus,
   Trash2,
+  Loader2,
 } from "lucide-react";
 import { useProjects } from "@/store/use-projects";
 import { useUI } from "@/store/use-ui";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Need to install tabs
 import { cn } from "@/lib/utils";
 import { Node } from "@xyflow/react";
+import { createClient } from "@/lib/supabase/client";
 
 interface AssetsPanelProps {
   onOpenGenerated?: () => void;
@@ -30,28 +32,65 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
   const { genHint, openGenerated, clearGenHint } = useUI();
   const inputRef = useRef<HTMLInputElement>(null);
   const p = active();
+  const supabase = createClient();
   
   const [activeTab, setActiveTab] = useState("assets");
+  const [isUploading, setIsUploading] = useState(false);
 
-  const onFiles = async (files: FileList | File[]) => {
-    const items: { type: "image" | "video"; url: string; name: string }[] = [];
-    for (const f of Array.from(files)) {
-      if (f.type.startsWith("image/")) {
-        items.push({
-          type: "image",
-          url: URL.createObjectURL(f),
-          name: f.name,
-        });
-      } else if (f.type.startsWith("video/")) {
-        items.push({
-          type: "video",
-          url: URL.createObjectURL(f),
-          name: f.name,
-        });
+  const uploadFileToStorage = useCallback(
+    async (file: File) => {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+      if (error || !user) {
+        throw new Error("You must be signed in to upload assets.");
       }
-    }
-    if (items.length) addAssets(items);
-  };
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+      const path = `${user.id}/library/${Date.now()}-${sanitizedName}`;
+      const { error: uploadError } = await supabase.storage
+        .from("assets")
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+      if (uploadError) {
+        throw uploadError;
+      }
+      const { data } = supabase.storage.from("assets").getPublicUrl(path);
+      return data.publicUrl;
+    },
+    [supabase]
+  );
+
+  const onFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const fileArray = Array.from(files);
+      if (!fileArray.length) return;
+      setIsUploading(true);
+      try {
+        const uploads: { type: "image" | "video"; url: string; name: string }[] = [];
+        for (const file of fileArray) {
+          if (file.type.startsWith("image/")) {
+            const url = await uploadFileToStorage(file);
+            uploads.push({ type: "image", url, name: file.name });
+          } else if (file.type.startsWith("video/")) {
+            const url = await uploadFileToStorage(file);
+            uploads.push({ type: "video", url, name: file.name });
+          }
+        }
+        if (uploads.length) {
+          await addAssets(uploads);
+        }
+      } catch (err) {
+        console.error("Upload failed", err);
+        alert("Failed to upload asset. Please try again.");
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [addAssets, uploadFileToStorage]
+  );
 
   const onAddText = () => {
     const text = prompt(
@@ -61,9 +100,9 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
     addAssets([{ type: "text", text }]);
   };
 
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
-    onFiles(e.dataTransfer.files);
+    await onFiles(e.dataTransfer.files);
   };
 
   const handleOpenGenerated = () => {
@@ -100,20 +139,34 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
             className="group border-2 border-dashed border-border rounded-xl p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-secondary/50 transition-all duration-200"
             onClick={() => inputRef.current?.click()}
           >
-            <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground group-hover:text-primary transition-colors" />
-            <p className="text-sm text-muted-foreground">
-              Drop images or videos
-            </p>
-            <p className="text-xs text-muted-foreground/60 mt-1">
-              or click to browse
-            </p>
+            {isUploading ? (
+              <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                <Loader2 className="w-6 h-6 animate-spin" />
+                <p className="text-sm">Uploading assets…</p>
+              </div>
+            ) : (
+              <>
+                <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground group-hover:text-primary transition-colors" />
+                <p className="text-sm text-muted-foreground">
+                  Drop images or videos
+                </p>
+                <p className="text-xs text-muted-foreground/60 mt-1">
+                  or click to browse
+                </p>
+              </>
+            )}
             <input
               ref={inputRef}
               type="file"
               accept="image/*,video/*"
               multiple
               hidden
-              onChange={(e) => e.target.files && onFiles(e.target.files)}
+              onChange={async (e) => {
+                if (e.target.files) {
+                  await onFiles(e.target.files);
+                  e.target.value = "";
+                }
+              }}
             />
           </div>
 
@@ -140,7 +193,7 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
                     JSON.stringify(
                       a.type === "text"
                         ? { type: "text", text: a.text }
-                        : { type: a.type, name: a.name, blobUrl: a.url }
+                        : { type: a.type, name: a.name, url: a.url }
                     )
                   );
                 }}

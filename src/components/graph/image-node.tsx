@@ -7,6 +7,8 @@ interface ImageNodeData {
   src?: string;
   alt?: string;
   note?: string;
+  uploading?: boolean;
+  uploadError?: boolean;
 }
 
 export function ImageNode({ data, selected }: NodeProps) {
@@ -43,6 +45,16 @@ export function ImageNode({ data, selected }: NodeProps) {
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
+            </div>
+          )}
+          {nodeData.uploading && (
+            <div className="absolute inset-0 bg-background/70 flex items-center justify-center text-xs font-medium">
+              Uploading…
+            </div>
+          )}
+          {nodeData.uploadError && (
+            <div className="absolute inset-0 bg-destructive/80 text-destructive-foreground flex items-center justify-center text-xs font-semibold text-center px-2">
+              Upload failed
             </div>
           )}
         </div>
