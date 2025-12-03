@@ -276,11 +276,12 @@ function GraphInner() {
   }, [selected, setNodes]);
 
   const deleteSelected = useCallback(() => {
-    if (!selected) return;
-    setEdges((eds) => eds.filter((e) => e.source !== selected.id && e.target !== selected.id));
-    setNodes((nds) => nds.filter((n) => n.id !== selected.id));
+    if (!selectedId) return;
+    const idToDelete = selectedId;
     setSelectedId(null);
-  }, [selected, setEdges, setNodes]);
+    setEdges((eds) => eds.filter((e) => e.source !== idToDelete && e.target !== idToDelete));
+    setNodes((nds) => nds.filter((n) => n.id !== idToDelete));
+  }, [selectedId, setEdges, setNodes]);
 
   // AI Features
   const handleRefinePrompt = useCallback(async () => {
