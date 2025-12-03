@@ -81,6 +81,7 @@ export function AssetsPanel({ onOpenGenerated, onDragPreset }: AssetsPanelProps)
           }
         }
         if (uploads.length) {
+          console.log("Adding assets to library:", uploads);
           await addAssets(uploads);
         }
       } catch (err) {
