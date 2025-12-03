@@ -328,7 +328,7 @@ function GraphInner() {
 
   const handleGenerate = useCallback(async () => {
     const prompt = promptPreview.trim() || buildSimplePrompt(nodes);
-    if (!prompt) {
+    if (!prompt && nodes.length === 0) {
       alert("Please add some nodes or write a prompt first!");
       return;
     }
@@ -338,39 +338,66 @@ function GraphInner() {
     setLastStatus(null);
 
     try {
-      // Collect image references from canvas nodes
+      // Collect ALL image references from canvas nodes
       const imageRefs = nodes
         .filter(n => n.type === 'imageNode' && n.data?.src)
         .map(n => ({
           url: n.data.src as string,
-          alt: (n.data.alt as string) || 'reference image'
+          alt: (n.data.alt as string) || 'reference image',
+          note: (n.data.note as string) || ''
         }))
-        .filter(img => !img.url.startsWith('blob:')); // Only use uploaded images, not temp blobs
+        .filter(img => !img.url.startsWith('blob:')); // Only use uploaded images
       
-      console.log("Generating with prompt:", prompt, "images:", imageRefs.length);
+      // Collect ALL node data for context
+      const nodeData = nodes.map(n => ({
+        type: n.type || 'unknown',
+        text: n.data?.text as string,
+        alt: n.data?.alt as string,
+        note: n.data?.note as string,
+        src: n.data?.src as string
+      }));
+      
+      // Collect edge/connection data
+      const edgeData = edges.map(e => ({
+        source: e.source,
+        target: e.target,
+        label: e.label as string
+      }));
+      
+      console.log("Generating with:", { 
+        prompt, 
+        images: imageRefs.length,
+        nodes: nodeData.length,
+        edges: edgeData.length
+      });
       
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ 
-          prompt, 
+          prompt: prompt || "Generate based on the canvas content",
           images: imageRefs,
-          provider: 'gemini' // Use Gemini for multimodal generation
+          nodes: nodeData,
+          edges: edgeData
         })
       });
       
       const data = await res.json();
       console.log("Generation result:", data);
 
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
       if (data.images && data.images.length > 0) {
         await addGenerated(data.images.map((img: any) => ({
           url: img.url,
-          prompt,
+          prompt: prompt || "Canvas-based generation",
         })));
-        setLastStatus(`✓ Generated via ${data.provider}!`);
+        setLastStatus(`✓ Generated via Gemini!`);
         openGenerated();
       } else {
-        throw new Error(data.error || "No images returned");
+        throw new Error("No images returned");
       }
     } catch (e: any) {
       console.error("Generation failed:", e);
@@ -379,7 +406,7 @@ function GraphInner() {
     } finally {
       setIsGenerating(false);
     }
-  }, [promptPreview, nodes, addGenerated, setGenHint, openGenerated]);
+  }, [promptPreview, nodes, edges, addGenerated, setGenHint, openGenerated]);
 
   // Drag & Drop
   const onDragOver = useCallback((evt: React.DragEvent) => {
