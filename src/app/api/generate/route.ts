@@ -23,7 +23,6 @@ interface RequestBody {
 
 async function urlToBase64(url: string): Promise<{ base64: string; mimeType: string } | null> {
   try {
-    // Skip blob URLs
     if (url.startsWith('blob:')) return null;
     
     const response = await fetch(url);
@@ -40,6 +39,95 @@ async function urlToBase64(url: string): Promise<{ base64: string; mimeType: str
   }
 }
 
+// Use Gemini to analyze images and create a detailed prompt
+async function analyzeWithGemini(
+  apiKey: string,
+  images: { url: string; alt: string; note?: string }[],
+  textDescriptors: string[],
+  userPrompt: string,
+  relationships: string[]
+): Promise<string> {
+  const parts: any[] = [];
+  
+  // Add images for analysis
+  let imagesAdded = 0;
+  for (const img of images.slice(0, 4)) { // Limit to 4 images
+    const imageData = await urlToBase64(img.url);
+    if (imageData) {
+      parts.push({
+        inlineData: {
+          mimeType: imageData.mimeType,
+          data: imageData.base64
+        }
+      });
+      parts.push({ 
+        text: `[This image is labeled: "${img.alt}"${img.note ? `. Note: ${img.note}` : ''}]` 
+      });
+      imagesAdded++;
+    }
+  }
+  
+  // Build analysis request
+  const analysisPrompt = `You are an expert creative director creating prompts for AI image generation.
+
+TASK: Analyze the provided content and create ONE detailed image generation prompt.
+
+${imagesAdded > 0 ? `REFERENCE IMAGES: ${imagesAdded} images provided above. Describe their key visual elements, style, colors, composition, subjects, and mood.` : ''}
+
+${textDescriptors.length > 0 ? `TEXT DESCRIPTORS:\n${textDescriptors.map(t => `- ${t}`).join('\n')}` : ''}
+
+${relationships.length > 0 ? `RELATIONSHIPS:\n${relationships.map(r => `- ${r}`).join('\n')}` : ''}
+
+USER'S VISION: ${userPrompt}
+
+Create a single, detailed image generation prompt (150-200 words) that:
+1. Incorporates the visual style and elements from the reference images
+2. Includes all the text descriptors as visual elements
+3. Respects the relationships between elements
+4. Fulfills the user's vision
+5. Uses specific, evocative language for lighting, composition, mood, and style
+6. Is optimized for AI image generation
+
+OUTPUT ONLY THE PROMPT TEXT, nothing else. No quotes, no preamble, no explanation.`;
+
+  parts.push({ text: analysisPrompt });
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 500,
+          }
+        })
+      }
+    );
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error("Gemini analysis error:", data);
+      return userPrompt; // Fall back to user prompt
+    }
+
+    const generatedPrompt = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (generatedPrompt) {
+      console.log("Gemini enhanced prompt:", generatedPrompt.slice(0, 100) + "...");
+      return generatedPrompt.trim();
+    }
+    
+    return userPrompt;
+  } catch (error) {
+    console.error("Gemini analysis failed:", error);
+    return userPrompt;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body: RequestBody = await request.json();
@@ -49,135 +137,43 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing prompt or canvas content" }, { status: 400 });
     }
 
+    // Extract text descriptors from nodes
+    const textDescriptors = nodes
+      .filter(n => n.type === 'textNode' && n.text)
+      .map(n => n.text as string);
+    
+    // Extract relationship labels from edges
+    const relationships = edges
+      .filter(e => e.label)
+      .map(e => e.label as string);
+
+    let finalPrompt = prompt || textDescriptors.join(", ");
+    
+    // If we have Gemini API key and images/content to analyze, enhance the prompt
     const apiKey = process.env.GEMINI_API_KEY;
-    
-    if (!apiKey) {
-      return NextResponse.json({ 
-        error: "Gemini API key not configured. Please add GEMINI_API_KEY to environment variables." 
-      }, { status: 500 });
+    if (apiKey && (images.length > 0 || textDescriptors.length > 0)) {
+      console.log("Using Gemini to analyze and enhance prompt...");
+      finalPrompt = await analyzeWithGemini(
+        apiKey,
+        images,
+        textDescriptors,
+        prompt || "Create a cohesive image based on the provided content",
+        relationships
+      );
     }
 
-    // Build context from all nodes and connections
-    let contextDescription = "";
-    
-    // Describe text nodes
-    const textNodes = nodes.filter(n => n.type === 'textNode' && n.text);
-    if (textNodes.length > 0) {
-      contextDescription += "Text descriptors:\n";
-      textNodes.forEach(n => {
-        contextDescription += `- ${n.text}\n`;
-      });
-    }
-    
-    // Describe image nodes
-    const imageNodes = nodes.filter(n => n.type === 'imageNode');
-    if (imageNodes.length > 0) {
-      contextDescription += "\nImage references:\n";
-      imageNodes.forEach(n => {
-        contextDescription += `- ${n.alt || 'Image'}${n.note ? ` (Note: ${n.note})` : ''}\n`;
-      });
-    }
-    
-    // Describe connections/relationships
-    if (edges.length > 0) {
-      contextDescription += "\nRelationships between elements:\n";
-      edges.forEach(e => {
-        const sourceNode = nodes.find(n => n.type === 'textNode' ? false : true); // simplified
-        contextDescription += `- ${e.label || 'connected to'}\n`;
-      });
-    }
+    // Generate image with Pollinations using the enhanced prompt
+    const seed = Math.floor(Math.random() * 1000000);
+    const safePrompt = encodeURIComponent(finalPrompt);
+    const imageUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
 
-    // Build the request parts for Gemini
-    const parts: any[] = [];
-    
-    // Add images first
-    let imagesAdded = 0;
-    for (const img of images) {
-      if (imagesAdded >= 5) break; // Limit to 5 images
-      
-      const imageData = await urlToBase64(img.url);
-      if (imageData) {
-        parts.push({
-          inlineData: {
-            mimeType: imageData.mimeType,
-            data: imageData.base64
-          }
-        });
-        parts.push({ 
-          text: `[Reference image: "${img.alt || 'visual reference'}"${img.note ? ` - ${img.note}` : ''}]` 
-        });
-        imagesAdded++;
-      }
-    }
-    
-    // Build the comprehensive prompt
-    const fullPrompt = `You are an expert AI image generator. Generate a high-quality, professional image based on the following:
-
-${contextDescription ? `CANVAS CONTEXT:\n${contextDescription}\n` : ''}
-${imagesAdded > 0 ? `REFERENCE IMAGES: ${imagesAdded} images provided above. Incorporate their visual style, subjects, colors, and aesthetic.\n` : ''}
-USER REQUEST: ${prompt}
-
-Generate an image that:
-1. Faithfully incorporates ALL the descriptors and traits mentioned
-2. Uses the reference images as strong visual inspiration (style, composition, mood)
-3. Creates a cohesive, professional result
-4. Is suitable for commercial/advertising use
-
-Generate the image now.`;
-
-    parts.push({ text: fullPrompt });
-
-    console.log("Sending to Gemini:", { 
-      prompt: fullPrompt.slice(0, 200) + "...", 
-      imagesCount: imagesAdded 
-    });
-
-    // Call Gemini 2.0 Flash for image generation
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: {
-            responseModalities: ["image", "text"],
-            responseMimeType: "image/png"
-          }
-        })
-      }
-    );
-
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error("Gemini API error:", data);
-      throw new Error(data.error?.message || "Gemini API error");
-    }
-
-    // Extract generated image from response
-    const generatedImages: { url: string; prompt: string }[] = [];
-    
-    if (data.candidates?.[0]?.content?.parts) {
-      for (const part of data.candidates[0].content.parts) {
-        if (part.inlineData?.data) {
-          // Convert base64 to data URL
-          const dataUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-          generatedImages.push({ url: dataUrl, prompt });
-        }
-      }
-    }
-
-    if (generatedImages.length === 0) {
-      // Check if there's a text response explaining why
-      const textResponse = data.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text;
-      throw new Error(textResponse || "Gemini did not return an image. Try a different prompt.");
-    }
+    console.log("Generating image with Pollinations, prompt length:", finalPrompt.length);
 
     return NextResponse.json({
-      images: generatedImages,
-      provider: "gemini",
-      mode: imagesAdded > 0 ? "reference" : "generate"
+      images: [{ url: imageUrl, prompt: finalPrompt }],
+      provider: apiKey ? "gemini+pollinations" : "pollinations",
+      mode: images.length > 0 ? "reference" : "generate",
+      enhanced: !!apiKey
     });
 
   } catch (error) {
