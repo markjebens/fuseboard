@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function Dashboard() {
-  const { active } = useProjects();
+  const { active, init } = useProjects(); // ✅ Added init
   const p = active();
   const [showGen, setShowGen] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
@@ -26,9 +26,12 @@ export default function Dashboard() {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
+      if (user) {
+        init(); // ✅ Fetch projects for this user
+      }
     };
     getUser();
-  }, [supabase.auth]);
+  }, [supabase.auth, init]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -99,4 +102,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
