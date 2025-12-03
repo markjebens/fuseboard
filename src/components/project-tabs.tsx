@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 export function ProjectTabs() {
-  const { projects, activeId, setActive, addProject, remove, rename } =
+  const { projects, activeId, setActive, addProject, remove, rename, isLoading } =
     useProjects();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState(`Project ${projects.length + 1}`);
@@ -18,6 +18,19 @@ export function ProjectTabs() {
     setName(`Project ${projects.length + 2}`);
     setCreating(false);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2">
+        {[1, 2].map((i) => (
+          <div
+            key={i}
+            className="h-9 w-32 rounded-full bg-secondary/50 animate-pulse border border-border/50"
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
