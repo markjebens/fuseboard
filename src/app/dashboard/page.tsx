@@ -105,6 +105,7 @@ export default function Dashboard() {
           ) : null}
           
           <Graph
+            key={p?.id || "default"} // Force remount when switching projects
             projectId={p?.id || "default"}
             onRequestGenerate={(prompt: string, images?: { id: string; alt: string; src: string }[]) => {
               console.log("Generated prompt:", prompt);
