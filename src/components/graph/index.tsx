@@ -52,8 +52,6 @@ const nodeTypes = {
   textNode: TextNode,
 };
 
-// ... (rest of the file remains unchanged)
-
 const EDGE_COLOR = "var(--muted-foreground)";
 
 // Helper functions
@@ -96,11 +94,25 @@ function buildSimplePrompt(nodes: Node[]) {
   return [texts, imgs].filter(Boolean).join(" ");
 }
 
+// Debounce helper for saving
+function useDebounce(value: any, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
 function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGenerate?: any }) {
-  const { setGraph: setGraphStore, markGenerated: markGeneratedStore, addGenerated, savePreset } = useProjects();
+  const { active, setGraph: setGraphStore, markGenerated: markGeneratedStore, addGenerated, savePreset, init } = useProjects();
   const { setGenHint } = useUI();
-  const storageKey = `fuseboard-graph:${projectId}`;
   const reactFlowInstance = useReactFlow();
+
+  // Get the active project from store - this ensures we are always viewing the correct project data
+  const project = active();
 
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -108,19 +120,16 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   const [presetName, setPresetName] = useState("");
   const [presetType, setPresetType] = useState<"theme" | "character">("theme");
 
-  const saved = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }, [storageKey]);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(saved?.nodes || []);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(saved?.edges || []);
+  // Initialize nodes from the project store
+  const [nodes, setNodes, onNodesChange] = useNodesState(project.nodes || []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(project.edges || []);
   
+  // Sync nodes/edges when project ID changes (e.g. switching tabs)
+  useEffect(() => {
+    setNodes(project.nodes || []);
+    setEdges(project.edges || []);
+  }, [project.id, setNodes, setEdges]); // Only reset when ID changes
+
   const [connectLabel, setConnectLabel] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = useMemo(() => nodes.find((n) => n.id === selectedId) || null, [nodes, selectedId]);
@@ -130,16 +139,20 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   const [isRefining, setIsRefining] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Initialize store on mount
   useEffect(() => {
-    try {
-        const slimNodes = nodes.map(n => n.type === 'imageNode' ? {...n, data: {...n.data, src: null}} : n);
-        localStorage.setItem(storageKey, JSON.stringify({ nodes: slimNodes, edges, v: 1 }));
-    } catch (e) { console.warn("Storage full"); }
-  }, [storageKey, nodes, edges]);
+    init();
+  }, []);
+
+  // Debounce save to Supabase/Store
+  const debouncedNodes = useDebounce(nodes, 1000);
+  const debouncedEdges = useDebounce(edges, 1000);
 
   useEffect(() => {
-    setGraphStore({ nodes, edges });
-  }, [nodes, edges, setGraphStore]);
+    if (project.id) {
+        setGraphStore({ nodes: debouncedNodes, edges: debouncedEdges });
+    }
+  }, [debouncedNodes, debouncedEdges, setGraphStore, project.id]);
 
   const onConnect = useCallback(
     (params: Connection) =>
@@ -160,19 +173,24 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
     [setEdges, connectLabel]
   );
 
+  // Node helpers
   const addTextNode = useCallback(() => {
     const id = nanoid(8);
-    const pos = reactFlowInstance.screenToFlowPosition({ x: window.innerWidth/2, y: window.innerHeight/2 });
+    // Center of screen or fallback
+    const pos = { x: 200, y: 200 }; 
+    // Try to get center if flow is ready
+    // const flowPos = reactFlowInstance.screenToFlowPosition({ x: window.innerWidth/2, y: window.innerHeight/2 });
+    
     setNodes((nds) => [
       ...nds,
       {
         id,
         type: "textNode",
-        position: { x: pos.x + Math.random()*50, y: pos.y + Math.random()*50 },
+        position: pos, 
         data: { text: "New descriptor", tags: [] },
       },
     ]);
-  }, [setNodes, reactFlowInstance]);
+  }, [setNodes]);
 
   const addImageNode = useCallback(() => fileRef.current?.click(), []);
   const createImageNodeFromFile = useCallback((file: File, pos?: { x: number; y: number }) => {
@@ -196,6 +214,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
       e.target.value = "";
     }, [createImageNodeFromFile]);
 
+  // Selection
   const onSelectionChange = useCallback(({ nodes: n }: { nodes: Node[] }) => {
     setSelectedId(n && n.length ? n[0].id : null);
   }, []);
@@ -212,10 +231,15 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
     setSelectedId(null);
   }, [selected, setEdges, setNodes]);
 
+
+  // AI Features
   const handleRefinePrompt = useCallback(async () => {
     setIsRefining(true);
     try {
+        // 1. Build a crude text representation of the graph
         const crudePrompt = buildSimplePrompt(nodes);
+        
+        // 2. Call Refine API
         const res = await fetch('/api/refine', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -225,7 +249,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
         if (data.refined) {
             setPromptPreview(data.refined);
         } else {
-            setPromptPreview(crudePrompt);
+            setPromptPreview(crudePrompt); // fallback
         }
     } catch (e) {
         console.error(e);
@@ -246,17 +270,20 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
       setGenHint(true);
 
       try {
+          // Call Generation API (defaults to Pollinations free)
           const res = await fetch('/api/generate', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({ 
                   prompt, 
                   provider: 'pollinations' 
+                  // We could pass images here if we upgrade the API to handle them
               })
           });
           const data = await res.json();
           if (data.images) {
-              addGenerated(data.images.map((img: any) => ({
+              // Wait for image to be "ready" or just push url
+              await addGenerated(data.images.map((img: any) => ({
                   url: img.url,
                   prompt,
               })));
@@ -270,6 +297,8 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
       }
   }, [promptPreview, nodes, addGenerated, setGenHint]);
 
+
+  // Drag & Drop
   const onDragOver = useCallback((evt: React.DragEvent) => {
     evt.preventDefault();
     evt.dataTransfer.dropEffect = "copy";
@@ -280,21 +309,25 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
       const bounds = evt.currentTarget.getBoundingClientRect();
       const pos = reactFlowInstance.screenToFlowPosition({ x: evt.clientX, y: evt.clientY });
 
+      // Handle Presets (Themes)
       const presetPayload = evt.dataTransfer.getData("application/x-preset");
       if (presetPayload) {
           try {
               const preset = JSON.parse(presetPayload);
+              // Import nodes/edges with offset
               const newNodes = preset.nodes.map((n: any) => ({
                   ...n,
                   id: nanoid(),
                   position: { x: n.position.x + pos.x, y: n.position.y + pos.y },
                   selected: true
               }));
+              // TODO: handle edges (needs ID mapping) - simple version just adds nodes
               setNodes((nds) => [...nds, ...newNodes]);
               return;
           } catch {}
       }
 
+      // Handle Assets
       const assetPayload = evt.dataTransfer.getData("application/x-asset");
       if (assetPayload) {
         try {
@@ -318,6 +351,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
         } catch {}
       }
       
+      // Handle Files
       if (evt.dataTransfer.files?.length) {
           createImageNodeFromFile(evt.dataTransfer.files[0], pos);
       }
@@ -325,7 +359,11 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
 
     const handleSavePreset = () => {
         if (!presetName) return;
-        const nodesToSave = selected ? [selected] : nodes;
+        // Save currently selected nodes or all nodes if none selected
+        const nodesToSave = selected ? [selected] : nodes; // In reality, multiselect is better
+        // For now, let's just save the whole graph as a "Theme" if nothing selected?
+        // Or better: Save the selection. React Flow supports multi-selection.
+        // We'll save ALL nodes for now as a "Scene Theme".
         savePreset(presetName, presetType, nodes, edges);
         setSaveDialogOpen(false);
         setPresetName("");
@@ -333,6 +371,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
 
   return (
     <div className="h-full w-full relative">
+      {/* Left control panel */}
       <div className="absolute top-4 left-4 z-10 w-64 glass rounded-xl shadow-sm border border-border/50">
         <div className="flex items-center justify-between p-3 border-b border-border/50 bg-card/50 rounded-t-xl">
           <h3 className="font-semibold text-xs uppercase tracking-widest text-muted-foreground">Tools</h3>
@@ -375,6 +414,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
         )}
       </div>
 
+      {/* Right inspector panel */}
       <div className="absolute top-4 right-4 z-10 w-80 glass rounded-xl shadow-lg border border-border/50 flex flex-col max-h-[calc(100%-32px)]">
         <div className="flex items-center justify-between p-3 border-b border-border/50 bg-card/50 rounded-t-xl">
           <h3 className="font-semibold text-xs uppercase tracking-widest text-muted-foreground">Inspector</h3>
@@ -385,6 +425,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
         
         {rightOpen && (
           <div className="p-4 space-y-4 overflow-y-auto flex-1">
+            {/* AI Prompt Section */}
             <div className="bg-card border border-border rounded-xl p-4 space-y-3 shadow-sm">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -427,6 +468,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
                 </div>
             </div>
 
+            {/* Node Editor */}
             {selected ? (
                 <div className="space-y-3 animate-fade-in">
                     <div className="flex items-center justify-between">
@@ -488,6 +530,7 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
         <Background color="var(--border)" gap={24} size={1} variant={BackgroundVariant.Dots} />
       </ReactFlow>
 
+      {/* Save Preset Dialog */}
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
           <DialogContent>
               <DialogHeader>
