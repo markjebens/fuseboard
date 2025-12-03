@@ -116,16 +116,31 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   // Manual debounce state to allow immediate reset on project switch
   const [debouncedNodes, setDebouncedNodes] = useState(nodes);
   const [debouncedEdges, setDebouncedEdges] = useState(edges);
+  
+  // Track last project ID to distinguish between "switch" and "initial load"
+  const lastProjectIdRef = useRef(project.id);
 
-  // Sync nodes/edges when project ID changes (e.g. switching tabs)
+  // Sync nodes/edges from store to local state
   useEffect(() => {
-    setNodes(project.nodes || []);
-    setEdges(project.edges || []);
+    const storeHasNodes = project.nodes && project.nodes.length > 0;
+    const localHasNodes = nodes.length > 0;
+    const idChanged = project.id !== lastProjectIdRef.current;
     
-    // CRITICAL: Reset debounced state immediately to prevent saving old data to new ID
-    setDebouncedNodes(project.nodes || []);
-    setDebouncedEdges(project.edges || []);
-  }, [project.id, setNodes, setEdges]); 
+    if (idChanged) {
+        // ID Changed: Force sync
+        setNodes(project.nodes || []);
+        setEdges(project.edges || []);
+        setDebouncedNodes(project.nodes || []);
+        setDebouncedEdges(project.edges || []);
+        lastProjectIdRef.current = project.id;
+    } else if (storeHasNodes && !localHasNodes) {
+        // ID Same, but Store populated and Local is empty (Initial Load after refresh)
+        setNodes(project.nodes || []);
+        setEdges(project.edges || []);
+        setDebouncedNodes(project.nodes || []);
+        setDebouncedEdges(project.edges || []);
+    }
+  }, [project.id, project.nodes, project.edges, nodes.length, setNodes, setEdges]); 
 
   // Debounce Logic for Nodes
   useEffect(() => {
