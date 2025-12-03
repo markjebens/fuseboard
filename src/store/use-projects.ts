@@ -65,6 +65,7 @@ interface ProjectsState {
   
   savePreset: (name: string, type: "theme" | "character", nodes: Node[], edges: Edge[]) => Promise<void>;
   deletePreset: (id: string) => Promise<void>;
+  removeGenerated: (id: string) => Promise<void>;
 }
 
 const makeEmptyProject = (name = "Untitled", id = nanoid()): Project => ({
@@ -356,5 +357,17 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   deletePreset: async (id) => {
     set((s) => ({ presets: s.presets.filter((p) => p.id !== id) }));
     await supabase.from("presets").delete().eq("id", id);
+  },
+
+  removeGenerated: async (id) => {
+    const p = get().active();
+    set((s) => ({
+      projects: s.projects.map((pr) =>
+        pr.id === p.id
+          ? { ...pr, generated: (pr.generated || []).filter((g) => g.id !== id) }
+          : pr
+      ),
+    }));
+    await supabase.from("generated_images").delete().eq("id", id);
   },
 }));

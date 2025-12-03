@@ -14,18 +14,14 @@ import {
 
 export function GeneratedModal() {
   const { generatedOpen, closeGenerated } = useUI();
-  const { active } = useProjects();
+  const { active, removeGenerated } = useProjects();
   const project = active();
   const items = useMemo(() => project?.generated || [], [project]);
 
   const [zoomIndex, setZoomIndex] = useState(-1);
 
   const handleDelete = (id: string) => {
-    const { projects, activeId } = useProjects.getState();
-    const p = projects.find((p) => p.id === (activeId || projects[0]?.id));
-    if (!p) return;
-    p.generated = (p.generated || []).filter((it) => it.id !== id);
-    useProjects.setState({ projects: [...projects] });
+    removeGenerated(id);
     setZoomIndex(-1);
   };
 
