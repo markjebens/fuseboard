@@ -348,13 +348,14 @@ function GraphInner() {
         }))
         .filter(img => !img.url.startsWith('blob:')); // Only use uploaded images
       
-      // Collect ALL node data for context
+      // Collect ALL node data for context (including Whisk-style roles)
       const nodeData = nodes.map(n => ({
         type: n.type || 'unknown',
         text: n.data?.text as string,
         alt: n.data?.alt as string,
         note: n.data?.note as string,
-        src: n.data?.src as string
+        src: n.data?.src as string,
+        role: n.data?.role as string // Whisk-style role: subject, scene, style, reference
       }));
       
       // Collect edge/connection data
@@ -608,18 +609,45 @@ function GraphInner() {
                   />
                 )}
                 {selected.type === 'imageNode' && (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
+                    {/* Whisk-style Role Selector */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Image Role (Whisk-style)</label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[
+                          { value: 'subject', label: 'Subject', icon: '👤', color: 'bg-blue-500/10 border-blue-500/30 text-blue-600' },
+                          { value: 'scene', label: 'Scene', icon: '🏔️', color: 'bg-green-500/10 border-green-500/30 text-green-600' },
+                          { value: 'style', label: 'Style', icon: '🎨', color: 'bg-purple-500/10 border-purple-500/30 text-purple-600' },
+                          { value: 'reference', label: 'Reference', icon: '📷', color: 'bg-muted border-border text-muted-foreground' },
+                        ].map(role => (
+                          <button
+                            key={role.value}
+                            onClick={() => updateSelectedData({ role: role.value })}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                              (selected.data.role || 'reference') === role.value
+                                ? role.color + " ring-2 ring-offset-1 ring-offset-background"
+                                : "bg-background border-border hover:bg-muted"
+                            )}
+                          >
+                            <span>{role.icon}</span>
+                            <span>{role.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    
                     <Input 
-                      value={selected.data.alt as string}
+                      value={selected.data.alt as string || ''}
                       onChange={e => updateSelectedData({alt: e.target.value})}
-                      placeholder="Image name/role..."
+                      placeholder="Describe what this image shows..."
                       className="h-8"
                     />
                     <Textarea 
                       value={selected.data.note as string || ""} 
                       onChange={e => updateSelectedData({note: e.target.value})}
                       className="text-xs min-h-[60px]"
-                      placeholder="Notes for AI..."
+                      placeholder="Additional details for AI..."
                     />
                   </div>
                 )}

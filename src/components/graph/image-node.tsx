@@ -1,14 +1,44 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Image as ImageIcon, Loader2, AlertTriangle } from "lucide-react";
+import { Image as ImageIcon, Loader2, AlertTriangle, User, Mountain, Palette } from "lucide-react";
 import { useState } from "react";
+
+export type ImageRole = "subject" | "scene" | "style" | "reference";
 
 interface ImageNodeData {
   src?: string;
   alt?: string;
   note?: string;
+  role?: ImageRole;
   uploading?: boolean;
   uploadError?: boolean;
 }
+
+const roleConfig = {
+  subject: { 
+    label: "Subject", 
+    icon: User, 
+    color: "bg-blue-500/10 text-blue-500 border-blue-500/30",
+    description: "Main subject/character"
+  },
+  scene: { 
+    label: "Scene", 
+    icon: Mountain, 
+    color: "bg-green-500/10 text-green-500 border-green-500/30",
+    description: "Background/environment"
+  },
+  style: { 
+    label: "Style", 
+    icon: Palette, 
+    color: "bg-purple-500/10 text-purple-500 border-purple-500/30",
+    description: "Visual style/aesthetic"
+  },
+  reference: { 
+    label: "Reference", 
+    icon: ImageIcon, 
+    color: "bg-muted text-muted-foreground border-border",
+    description: "General reference"
+  },
+};
 
 export function ImageNode({ data, selected }: NodeProps) {
   const nodeData = data as ImageNodeData;
@@ -19,8 +49,12 @@ export function ImageNode({ data, selected }: NodeProps) {
   const isUploading = nodeData?.uploading;
   const hasError = nodeData?.uploadError || imgError;
   
+  const role = nodeData.role || "reference";
+  const config = roleConfig[role];
+  const RoleIcon = config.icon;
+  
   return (
-    <div className={`w-60 bg-card border transition-all duration-200 rounded-xl shadow-sm overflow-hidden ${selected ? 'border-primary ring-2 ring-primary/20' : 'border-border'}`}>
+    <div className={`w-64 bg-card border-2 transition-all duration-200 rounded-xl shadow-sm overflow-hidden ${selected ? 'border-primary ring-2 ring-primary/20' : config.color.split(' ')[2] || 'border-border'}`}>
       <Handle
         type="target"
         position={Position.Left}
@@ -32,18 +66,17 @@ export function ImageNode({ data, selected }: NodeProps) {
         className="!w-2.5 !h-2.5 !bg-background !border-2 !border-primary"
       />
 
-      <div className="p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-5 h-5 rounded-md bg-primary/10 flex items-center justify-center text-primary">
-            <ImageIcon className="w-3 h-3" />
-          </div>
-          <span className="text-xs font-semibold text-foreground">Image Reference</span>
-          {isUploading && (
-            <Loader2 className="w-3 h-3 animate-spin text-muted-foreground ml-auto" />
-          )}
-        </div>
+      {/* Role Badge */}
+      <div className={`px-3 py-1.5 flex items-center gap-2 ${config.color.split(' ').slice(0, 2).join(' ')} border-b ${config.color.split(' ')[2]}`}>
+        <RoleIcon className="w-3.5 h-3.5" />
+        <span className="text-xs font-bold uppercase tracking-wider">{config.label}</span>
+        {isUploading && (
+          <Loader2 className="w-3 h-3 animate-spin ml-auto" />
+        )}
+      </div>
 
-        <div className="aspect-video rounded-lg overflow-hidden bg-muted border border-border/50 relative group">
+      <div className="p-3">
+        <div className="aspect-[4/3] rounded-lg overflow-hidden bg-muted border border-border/50 relative group">
           {isUploading ? (
             <div className="w-full h-full flex flex-col items-center justify-center">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40 mb-1" />
@@ -81,7 +114,7 @@ export function ImageNode({ data, selected }: NodeProps) {
         </div>
 
         <div className="mt-2">
-          <p className="text-xs font-medium truncate">{nodeData.alt || "Untitled Image"}</p>
+          <p className="text-sm font-medium truncate">{nodeData.alt || "Untitled Image"}</p>
           {nodeData.note && <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5">{nodeData.note}</p>}
         </div>
       </div>
