@@ -95,21 +95,9 @@ function buildSimplePrompt(nodes: Node[]) {
   return [texts, imgs].filter(Boolean).join(" ");
 }
 
-// Debounce helper for saving
-function useDebounce(value: any, delay: number) {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-    return () => clearTimeout(handler);
-  }, [value, delay]);
-  return debouncedValue;
-}
-
 function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGenerate?: any }) {
   const { active, setGraph: setGraphStore, markGenerated: markGeneratedStore, addGenerated, savePreset, init } = useProjects();
-  const { setGenHint, openGenerated } = useUI(); // Fixed name
+  const { setGenHint, openGenerated } = useUI(); 
   const reactFlowInstance = useReactFlow();
 
   // Get the active project from store - this ensures we are always viewing the correct project data
@@ -125,11 +113,42 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   const [nodes, setNodes, onNodesChange] = useNodesState(project.nodes || []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(project.edges || []);
   
+  // Manual debounce state to allow immediate reset on project switch
+  const [debouncedNodes, setDebouncedNodes] = useState(nodes);
+  const [debouncedEdges, setDebouncedEdges] = useState(edges);
+
   // Sync nodes/edges when project ID changes (e.g. switching tabs)
   useEffect(() => {
     setNodes(project.nodes || []);
     setEdges(project.edges || []);
-  }, [project.id, setNodes, setEdges]); // Only reset when ID changes
+    
+    // CRITICAL: Reset debounced state immediately to prevent saving old data to new ID
+    setDebouncedNodes(project.nodes || []);
+    setDebouncedEdges(project.edges || []);
+  }, [project.id, setNodes, setEdges]); 
+
+  // Debounce Logic for Nodes
+  useEffect(() => {
+    const handler = setTimeout(() => {
+        setDebouncedNodes(nodes);
+    }, 1000);
+    return () => clearTimeout(handler);
+  }, [nodes]);
+
+  // Debounce Logic for Edges
+  useEffect(() => {
+    const handler = setTimeout(() => {
+        setDebouncedEdges(edges);
+    }, 1000);
+    return () => clearTimeout(handler);
+  }, [edges]);
+
+  // Save Logic
+  useEffect(() => {
+    if (project.id) {
+        setGraphStore({ nodes: debouncedNodes, edges: debouncedEdges });
+    }
+  }, [debouncedNodes, debouncedEdges, setGraphStore, project.id]);
 
   const [connectLabel, setConnectLabel] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -145,16 +164,6 @@ function GraphInner({ projectId = "default" }: { projectId?: string; onRequestGe
   useEffect(() => {
     init();
   }, []);
-
-  // Debounce save to Supabase/Store
-  const debouncedNodes = useDebounce(nodes, 1000);
-  const debouncedEdges = useDebounce(edges, 1000);
-
-  useEffect(() => {
-    if (project.id) {
-        setGraphStore({ nodes: debouncedNodes, edges: debouncedEdges });
-    }
-  }, [debouncedNodes, debouncedEdges, setGraphStore, project.id]);
 
   const onConnect = useCallback(
     (params: Connection) =>
