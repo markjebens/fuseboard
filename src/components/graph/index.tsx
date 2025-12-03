@@ -114,8 +114,8 @@ function GraphInner() {
   const [lastStatus, setLastStatus] = useState<string | null>(null);
 
   // React Flow state - initialize empty, will sync from project
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   
   // Track which project we're synced to
   const syncedProjectIdRef = useRef<string | null>(null);
