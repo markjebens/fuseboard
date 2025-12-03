@@ -60,7 +60,7 @@ interface ProjectsState {
   setActive: (id: string) => void;
   addAssets: (assets: Omit<Asset, "id">[]) => Promise<void>;
   removeAsset: (id: string) => Promise<void>;
-  setGraph: (graph: { nodes: Node[]; edges: Edge[] }) => Promise<void>;
+  setGraph: (graph: { nodes: Node[]; edges: Edge[]; projectId?: string }) => Promise<void>;
   markGenerated: (payload: Project["lastGenerated"]) => void;
   addGenerated: (items: Omit<GeneratedItem, "id" | "createdAt">[]) => Promise<void>;
   
@@ -246,24 +246,24 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     await supabase.from("assets").insert(dbAssets);
   },
 
-  setGraph: async ({ nodes, edges }) => {
-    const p = get().active();
+  setGraph: async ({ nodes, edges, projectId }) => {
+    // Use provided projectId or fall back to active
+    const targetId = projectId || get().activeId;
+    if (!targetId) return;
     
     // Update local state immediately
     set((s) => ({
       projects: s.projects.map((pr) =>
-        pr.id === p.id ? { ...pr, nodes, edges } : pr
+        pr.id === targetId ? { ...pr, nodes, edges } : pr
       ),
     }));
 
-    // Debounce saving to Supabase is handled by the caller usually, but let's do a basic save here
-    // For production, use a proper debounce utility or React Query mutations
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Sync Nodes (Upsert)
+    // Sync Nodes
     const dbNodes = nodes.map(n => ({
-        project_id: p.id,
+        project_id: targetId,
         node_id: n.id,
         type: n.type,
         position_x: n.position.x,
@@ -273,21 +273,16 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     
     // Sync Edges
     const dbEdges = edges.map(e => ({
-        project_id: p.id,
+        project_id: targetId,
         edge_id: e.id,
         source_node_id: e.source,
         target_node_id: e.target,
         label: e.label as string
     }));
 
-    // We delete old ones and insert new ones to keep it synced (simplest approach for graph)
-    // Or upsert. Since we want to remove deleted nodes, delete-insert is safer for now
-    // Optimization: In a real app, track diffs.
-    
-    // Using upsert might leave orphans. Let's clear for this project and re-insert.
-    // Warning: This is heavy. In a high-scale app, diffing is needed.
-    await supabase.from("graph_nodes").delete().eq("project_id", p.id);
-    await supabase.from("graph_edges").delete().eq("project_id", p.id);
+    // Delete old and insert new
+    await supabase.from("graph_nodes").delete().eq("project_id", targetId);
+    await supabase.from("graph_edges").delete().eq("project_id", targetId);
     
     if (dbNodes.length) await supabase.from("graph_nodes").insert(dbNodes);
     if (dbEdges.length) await supabase.from("graph_edges").insert(dbEdges);

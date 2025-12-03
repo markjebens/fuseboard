@@ -122,19 +122,15 @@ function GraphInner() {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // CRITICAL: Sync nodes/edges when project changes or project data loads
+  // CRITICAL: Sync nodes/edges ONLY when project changes (not when store updates from local changes)
   useEffect(() => {
     const currentProjectId = project?.id;
-    const currentNodes = project?.nodes || [];
-    const currentEdges = project?.edges || [];
     
-    // Check if we need to sync (project changed OR data just loaded)
-    const projectChanged = currentProjectId !== syncedProjectIdRef.current;
-    const dataLoaded = syncedProjectIdRef.current === currentProjectId && 
-                       nodes.length === 0 && 
-                       currentNodes.length > 0;
-    
-    if (projectChanged || dataLoaded) {
+    // Only sync when switching to a different project
+    if (currentProjectId && currentProjectId !== syncedProjectIdRef.current) {
+      const currentNodes = project?.nodes || [];
+      const currentEdges = project?.edges || [];
+      
       console.log("Syncing canvas to project:", currentProjectId, 
                   "nodes:", currentNodes.length, 
                   "edges:", currentEdges.length);
@@ -154,12 +150,14 @@ function GraphInner() {
       setPromptPreview("");
       setSelectedId(null);
     }
-  }, [project?.id, project?.nodes, project?.edges, nodes.length, setNodes, setEdges]);
+  }, [project?.id, setNodes, setEdges]);
 
   // Save to store with debounce
   useEffect(() => {
+    const currentProjectId = syncedProjectIdRef.current;
+    
     // Don't save if we haven't synced yet or if project just changed
-    if (!syncedProjectIdRef.current || syncedProjectIdRef.current !== project?.id) {
+    if (!currentProjectId || currentProjectId !== project?.id) {
       return;
     }
     
@@ -168,10 +166,10 @@ function GraphInner() {
       clearTimeout(saveTimeoutRef.current);
     }
     
-    // Debounce save
+    // Debounce save - capture projectId at save time
     saveTimeoutRef.current = setTimeout(() => {
-      console.log("Saving graph for project:", project?.id, "nodes:", nodes.length);
-      setGraphStore({ nodes, edges });
+      console.log("Saving graph for project:", currentProjectId, "nodes:", nodes.length);
+      setGraphStore({ nodes, edges, projectId: currentProjectId });
     }, 1500);
     
     return () => {
@@ -276,11 +274,30 @@ function GraphInner() {
   }, [selected, setNodes]);
 
   const deleteSelected = useCallback(() => {
-    if (!selectedId) return;
     const idToDelete = selectedId;
+    if (!idToDelete) {
+      console.log("No node selected to delete");
+      return;
+    }
+    
+    console.log("Deleting node:", idToDelete);
+    
+    // Clear selection first
     setSelectedId(null);
-    setEdges((eds) => eds.filter((e) => e.source !== idToDelete && e.target !== idToDelete));
-    setNodes((nds) => nds.filter((n) => n.id !== idToDelete));
+    
+    // Remove edges connected to this node
+    setEdges((currentEdges) => {
+      const filtered = currentEdges.filter((e) => e.source !== idToDelete && e.target !== idToDelete);
+      console.log("Edges after delete:", filtered.length);
+      return filtered;
+    });
+    
+    // Remove the node
+    setNodes((currentNodes) => {
+      const filtered = currentNodes.filter((n) => n.id !== idToDelete);
+      console.log("Nodes after delete:", filtered.length);
+      return filtered;
+    });
   }, [selectedId, setEdges, setNodes]);
 
   // AI Features
